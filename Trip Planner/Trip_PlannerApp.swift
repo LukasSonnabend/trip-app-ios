@@ -1,32 +1,36 @@
-//
-//  Trip_PlannerApp.swift
-//  Trip Planner
-//
-//  Created by Lukas Sonnabend on 03.08.2026.
-//
-
 import SwiftUI
-import SwiftData
 
 @main
 struct Trip_PlannerApp: App {
-    var sharedModelContainer: ModelContainer = {
-        let schema = Schema([
-            Item.self,
-        ])
-        let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
-
-        do {
-            return try ModelContainer(for: schema, configurations: [modelConfiguration])
-        } catch {
-            fatalError("Could not create ModelContainer: \(error)")
-        }
-    }()
+    @StateObject private var authVM = AuthViewModel()
 
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .environmentObject(authVM)
+                .onOpenURL { url in
+                    handleDeepLink(url)
+                }
         }
-        .modelContainer(sharedModelContainer)
     }
+
+    private func handleDeepLink(_ url: URL) {
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: true),
+              let host = components.host else { return }
+
+        if host == "join" || host == "invite" {
+            let path = url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            if !path.isEmpty {
+                NotificationCenter.default.post(
+                    name: .openInvite,
+                    object: nil,
+                    userInfo: ["code": path]
+                )
+            }
+        }
+    }
+}
+
+extension Notification.Name {
+    static let openInvite = Notification.Name("openInvite")
 }

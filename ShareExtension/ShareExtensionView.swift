@@ -111,6 +111,7 @@ final class ShareExtensionViewModel: ObservableObject {
             trips = try await client.request("GET", "trips")
             state = trips.isEmpty ? .error("No trips found. Create one in the app first.") : .selectTrip(trips)
         } catch {
+            if error.isCancellationError { return }
             state = .error(error.localizedDescription)
         }
     }
@@ -139,6 +140,7 @@ final class ShareExtensionViewModel: ObservableObject {
             )
             state = .result(items)
         } catch {
+            if error.isCancellationError { return }
             state = .error(error.localizedDescription)
         }
     }

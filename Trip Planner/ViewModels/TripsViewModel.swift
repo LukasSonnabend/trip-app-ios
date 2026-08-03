@@ -17,6 +17,7 @@ final class TripsViewModel: ObservableObject {
         do {
             trips = try await client.request("GET", "trips")
         } catch {
+            if error.isCancellationError { return }
             if case APIError.unauthenticated = error { return }
             errorMessage = error.localizedDescription
         }
@@ -34,6 +35,7 @@ final class TripsViewModel: ObservableObject {
             await loadTrips()
             _ = response
         } catch {
+            if error.isCancellationError { return }
             errorMessage = error.localizedDescription
         }
         isLoading = false
@@ -46,6 +48,7 @@ final class TripsViewModel: ObservableObject {
         do {
             tripDetail = try await client.request("GET", "trips/\(id)")
         } catch {
+            if error.isCancellationError { return }
             if case APIError.notFound = error {
                 errorMessage = "You don't have access to this trip."
             } else {
@@ -61,6 +64,7 @@ final class TripsViewModel: ObservableObject {
         do {
             inviteCode = try await client.request("POST", "trips/\(tripId)/invites")
         } catch {
+            if error.isCancellationError { return }
             errorMessage = error.localizedDescription
         }
         isLoading = false
@@ -70,6 +74,7 @@ final class TripsViewModel: ObservableObject {
         do {
             try await client.requestVoid("DELETE", "trips/\(tripId)/invites/\(code)")
         } catch {
+            if error.isCancellationError { return }
             errorMessage = error.localizedDescription
         }
     }

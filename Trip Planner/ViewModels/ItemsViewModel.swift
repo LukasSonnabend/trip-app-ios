@@ -15,6 +15,7 @@ final class ItemsViewModel: ObservableObject {
         do {
             items = try await client.request("GET", "trips/\(tripId)/items")
         } catch {
+            if error.isCancellationError { return }
             errorMessage = error.localizedDescription
         }
         isLoading = false
@@ -25,6 +26,7 @@ final class ItemsViewModel: ObservableObject {
             try await client.requestVoid("DELETE", "trips/\(tripId)/items/\(itemId)")
             await loadItems(tripId: tripId)
         } catch {
+            if error.isCancellationError { return }
             errorMessage = error.localizedDescription
         }
     }
@@ -51,6 +53,7 @@ final class ItemsViewModel: ObservableObject {
             )
             return result
         } catch {
+            if error.isCancellationError { return [] }
             errorMessage = error.localizedDescription
             return []
         }

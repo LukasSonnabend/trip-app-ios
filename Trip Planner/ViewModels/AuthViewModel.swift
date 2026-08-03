@@ -30,6 +30,7 @@ final class AuthViewModel: ObservableObject {
             KeychainManager.shared.refreshToken = response.refreshToken
             isAuthenticated = true
         } catch {
+            if error.isCancellationError { return }
             errorMessage = error.localizedDescription
         }
         isLoading = false
@@ -48,6 +49,7 @@ final class AuthViewModel: ObservableObject {
             KeychainManager.shared.refreshToken = response.refreshToken
             isAuthenticated = true
         } catch {
+            if error.isCancellationError { return }
             errorMessage = error.localizedDescription
         }
         isLoading = false

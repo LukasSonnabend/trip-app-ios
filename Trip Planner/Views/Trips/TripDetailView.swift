@@ -76,12 +76,14 @@ struct TripDetailView: View {
             }
         }
         .refreshable {
-            async let _: () = tripsVM.loadTrip(id: tripId)
-            async let _: () = itemsVM.loadItems(tripId: tripId)
+            async let tripLoad: () = tripsVM.loadTrip(id: tripId)
+            async let itemsLoad: () = itemsVM.loadItems(tripId: tripId)
+            _ = await (tripLoad, itemsLoad)
         }
         .task {
-            async let _: () = tripsVM.loadTrip(id: tripId)
-            async let _: () = itemsVM.loadItems(tripId: tripId)
+            async let tripLoad: () = tripsVM.loadTrip(id: tripId)
+            async let itemsLoad: () = itemsVM.loadItems(tripId: tripId)
+            _ = await (tripLoad, itemsLoad)
         }
         .alert("Invite Code", isPresented: $showCreatedInvite) {
             if let code = tripsVM.inviteCode {

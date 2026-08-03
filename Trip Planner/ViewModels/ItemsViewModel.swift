@@ -12,13 +12,13 @@ final class ItemsViewModel: ObservableObject {
     func loadItems(tripId: String) async {
         isLoading = true
         errorMessage = nil
+        defer { isLoading = false }
         do {
             items = try await client.request("GET", "trips/\(tripId)/items")
         } catch {
             if error.isCancellationError { return }
             errorMessage = error.localizedDescription
         }
-        isLoading = false
     }
 
     func deleteItem(tripId: String, itemId: String) async {

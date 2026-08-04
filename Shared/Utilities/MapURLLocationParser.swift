@@ -1,5 +1,4 @@
 import Foundation
-import UniformTypeIdentifiers
 
 struct ParsedMapLocation {
     let name: String?
@@ -96,13 +95,7 @@ enum MapURLLocationParser {
         let urlString = url.absoluteString
 
         if let atMatch = extractGoogleAtCoords(urlString) {
-            var name: String?
-            if let pathComponents = URLComponents(url: url, resolvingAgainstBaseURL: false)?.path {
-                let parts = pathComponents.split(separator: "/")
-                if let placeIndex = parts.firstIndex(of: "place"), placeIndex + 1 < parts.count {
-                    name = String(parts[placeIndex + 1]).replacingOccurrences(of: "+", with: " ").removingPercentEncoding
-                }
-            }
+            var name = extractGooglePlaceName(url)
             return ParsedMapLocation(name: name, address: nil, latitude: atMatch.lat, longitude: atMatch.lng)
         }
 
@@ -110,6 +103,31 @@ enum MapURLLocationParser {
             return ParsedMapLocation(name: nil, address: nil, latitude: qMatch.lat, longitude: qMatch.lng)
         }
 
+        if let name = extractGooglePlaceName(url) {
+            return ParsedMapLocation(name: name, address: nil, latitude: nil, longitude: nil)
+        }
+
+        return nil
+    }
+
+    private static func extractGooglePlaceName(_ url: URL) -> String? {
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let queryItems = components.queryItems else { return nil }
+        let params = Dictionary(uniqueKeysWithValues: queryItems.compactMap { item in
+            item.value.map { (item.name, $0) }
+        })
+        if let q = params["q"]?.removingPercentEncoding {
+            let parts = q.split(separator: ",").compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
+            if parts.isEmpty {
+                return q.replacingOccurrences(of: "+", with: " ").trimmingCharacters(in: .whitespaces)
+            }
+        }
+        if let pathComponents = URLComponents(url: url, resolvingAgainstBaseURL: false)?.path {
+            let parts = pathComponents.split(separator: "/")
+            if let placeIndex = parts.firstIndex(of: "place"), placeIndex + 1 < parts.count {
+                return String(parts[placeIndex + 1]).replacingOccurrences(of: "+", with: " ").removingPercentEncoding
+            }
+        }
         return nil
     }
 

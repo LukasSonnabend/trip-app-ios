@@ -11,11 +11,13 @@ struct TripDetailView: View {
     @State private var showCreatedInvite = false
     @State private var editingItem: ItineraryItem?
     @State private var showingCreateItem = false
+    @State private var showingAddExpense = false
     @State private var showingTravelersSheet = false
     @State private var splitConfigItem: ItineraryItem?
     @State private var isSelecting = false
     @State private var selectedIds = Set<String>()
     @State private var selectedTab = 0
+    @State private var navigateItem: ItineraryItem?
 
     private var itineraryItems: [ItineraryItem] {
         itemsVM.items.filter { $0.startTime != nil || $0.endTime != nil }
@@ -88,6 +90,17 @@ struct TripDetailView: View {
                 onClose: { showingCreateItem = false }
             )
         }
+        .sheet(isPresented: $showingAddExpense) {
+            AddExpenseSheet(
+                tripId: tripId,
+                travelers: travelersVM.travelers,
+                onCreate: { newItem in
+                    itemsVM.items.append(newItem)
+                    itemsVM.items = itemsVM.sortItems(itemsVM.items)
+                },
+                onClose: { showingAddExpense = false }
+            )
+        }
         .sheet(isPresented: $showingTravelersSheet) {
             TravelersSheet(tripId: tripId, onDismiss: { showingTravelersSheet = false }, travelersVM: travelersVM)
         }
@@ -96,6 +109,22 @@ struct TripDetailView: View {
         }
         .onChange(of: isSelecting) { _, newValue in
             if !newValue { selectedIds.removeAll() }
+        }
+        .confirmationDialog("Navigate with", isPresented: .init(
+            get: { navigateItem != nil },
+            set: { if !$0 { navigateItem = nil } }
+        ), titleVisibility: .visible) {
+            if let item = navigateItem {
+                if let url = navAppleMapsURL(for: item) {
+                    Button("Apple Maps") { UIApplication.shared.open(url) }
+                }
+                if let url = navGoogleMapsURL(for: item) {
+                    Button("Google Maps") { UIApplication.shared.open(url) }
+                }
+                if let url = navWazeURL(for: item) {
+                    Button("Waze") { UIApplication.shared.open(url) }
+                }
+            }
         }
     }
 
@@ -209,7 +238,11 @@ struct TripDetailView: View {
                             onEdit: { editingItem = $0 },
                             onConfigureSplit: { splitConfigItem = $0 },
                             onAddToItinerary: { date in addToItinerary(item: item, date: date) },
-                            travelers: travelersVM.travelers
+                            travelers: travelersVM.travelers,
+                            onNavigate: { navigateItem = $0 },
+                            onHalveCost: { origin in
+                                Task { await itemsVM.splitPrice(tripId: tripId, originItem: origin) }
+                            }
                         )
                     }
                     .contentShape(Rectangle())
@@ -221,6 +254,10 @@ struct TripDetailView: View {
                         Task { await itemsVM.deleteItem(tripId: tripId, itemId: item.id) }
                     }
                 }
+                .onMove { source, destination in
+                    itemsVM.reorderItems(tripId: tripId, from: source, to: destination)
+                }
+                .moveDisabled(isSelecting)
             }
         }
     }
@@ -310,6 +347,13 @@ struct TripDetailView: View {
             }
             ToolbarItem(placement: .primaryAction) {
                 Button {
+                    showingAddExpense = true
+                } label: {
+                    Image(systemName: "dollarsign.circle")
+                }
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Button {
                     showingCreateItem = true
                 } label: {
                     Image(systemName: "plus")
@@ -327,6 +371,8 @@ struct ItemCard: View {
     let onConfigureSplit: (ItineraryItem) -> Void
     let onAddToItinerary: (Date) -> Void
     let travelers: [Traveler]
+    let onNavigate: (ItineraryItem) -> Void
+    let onHalveCost: (ItineraryItem) -> Void
 
     @State private var expanded = false
     @State private var showSourcePDF = false
@@ -471,6 +517,13 @@ struct ItemCard: View {
                     Label("Add to Itinerary", systemImage: "calendar.badge.plus")
                 }
             }
+            if item.location.latitude != nil || item.location.name != nil {
+                    Button {
+                        onNavigate(item)
+                    } label: {
+                        Label("Navigate", systemImage: "arrow.triangle.turn.up.right.diamond")
+                    }
+            }
             if item.price != nil, !travelers.isEmpty {
                 Menu {
                     if let current = quickAssignedTravelerId {
@@ -489,6 +542,11 @@ struct ItemCard: View {
                     }
                 } label: {
                     Label("Assign to...", systemImage: "person.badge.plus")
+                }
+                Button {
+                    onHalveCost(item)
+                } label: {
+                    Label("Halve Cost", systemImage: "divide")
                 }
                 Button {
                     onConfigureSplit(item)
@@ -659,6 +717,53 @@ struct LegRow: View {
         }
         .padding(.leading, 32)
     }
+}
+
+private func navDestinationQuery(for item: ItineraryItem) -> String {
+    if let lat = item.location.latitude, let lng = item.location.longitude {
+        return "\(lat),\(lng)"
+    }
+    if let address = item.location.address {
+        return address.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? address
+    }
+    if let name = item.location.name {
+        return name.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? name
+    }
+    return ""
+}
+
+private func navDestinationName(for item: ItineraryItem) -> String {
+    (item.location.name ?? item.location.address ?? "Destination")
+        .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "Destination"
+}
+
+private func navAppleMapsURL(for item: ItineraryItem) -> URL? {
+    let query = navDestinationQuery(for: item)
+    guard !query.isEmpty else { return nil }
+    if item.location.latitude != nil {
+        return URL(string: "https://maps.apple.com/?daddr=\(query)&q=\(navDestinationName(for: item))")
+    }
+    return URL(string: "https://maps.apple.com/?q=\(query)")
+}
+
+private func navGoogleMapsURL(for item: ItineraryItem) -> URL? {
+    guard UIApplication.shared.canOpenURL(URL(string: "comgooglemaps://")!) else { return nil }
+    let query = navDestinationQuery(for: item)
+    guard !query.isEmpty else { return nil }
+    if item.location.latitude != nil {
+        return URL(string: "comgooglemaps://?daddr=\(query)&navigate=yes")
+    }
+    return URL(string: "comgooglemaps://?q=\(query)")
+}
+
+private func navWazeURL(for item: ItineraryItem) -> URL? {
+    guard UIApplication.shared.canOpenURL(URL(string: "waze://")!) else { return nil }
+    if let lat = item.location.latitude, let lng = item.location.longitude {
+        return URL(string: "waze://?ll=\(lat),\(lng)&navigate=yes")
+    }
+    let query = navDestinationQuery(for: item)
+    guard !query.isEmpty else { return nil }
+    return URL(string: "waze://?q=\(query)")
 }
 
 #Preview {

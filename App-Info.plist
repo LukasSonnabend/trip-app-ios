@@ -4,5 +4,9 @@
 <dict>
 	<key>API_BASE_URL</key>
 	<string>$(API_BASE_URL)</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Camera is used to scan receipts for expense tracking.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Photo library access is used to select receipt images.</string>
 </dict>
 </plist>

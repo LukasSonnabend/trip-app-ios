@@ -150,32 +150,46 @@ struct TripMapView: View {
         }
 
         let itemCoordMap = buildItemCoordMap(from: grouped)
+        let itemTimeZones = buildItemTimeZones(from: itemCoordMap)
 
         for car in items where car.itemType == .rentalCar {
             guard let pickupCoord = itemPickupCoords[car.id],
                   let dropoffCoord = itemDropoffCoords[car.id] else { continue }
 
-            let carStart = car.startTime.flatMap(FlexibleDateFormatter.parseLocal(_:))
-            let carEnd = car.endTime.flatMap(FlexibleDateFormatter.parseLocal(_:))
+            let carTZ = itemTimeZones[car.id] ?? TimeZone.current
+            let carStart = car.startTime.flatMap { FlexibleDateFormatter.parseInTimeZone($0, timeZone: carTZ) }
+            let carEnd = car.endTime.flatMap { FlexibleDateFormatter.parseInTimeZone($0, timeZone: carTZ) }
 
             let related = items
                 .filter { $0.id != car.id }
                 .filter { item in
-                    guard let cs = carStart, let ce = carEnd,
-                          let start = item.startTime.flatMap(FlexibleDateFormatter.parseLocal(_:)) else { return false }
-                    return start >= cs && start <= ce
+                    guard let cs = carStart,
+                          let itemStart = item.startTime.flatMap({ FlexibleDateFormatter.parseInTimeZone($0, timeZone: itemTimeZones[item.id] ?? TimeZone.current) }) else { return false }
+                    if let ce = carEnd {
+                        return itemStart >= cs && itemStart <= ce
+                    }
+                    return itemStart >= cs
                 }
                 .sorted { a, b in
-                    let dateA = a.startTime.flatMap(FlexibleDateFormatter.parseLocal(_:)) ?? Date.distantFuture
-                    let dateB = b.startTime.flatMap(FlexibleDateFormatter.parseLocal(_:)) ?? Date.distantFuture
+                    if let orderA = a.displayOrder, let orderB = b.displayOrder {
+                        return orderA < orderB
+                    }
+                    if a.displayOrder != nil { return true }
+                    if b.displayOrder != nil { return false }
+                    let tz = itemTimeZones[a.id] ?? TimeZone.current
+                    let dateA = a.startTime.flatMap({ FlexibleDateFormatter.parseInTimeZone($0, timeZone: tz) }) ?? Date.distantFuture
+                    let dateB = b.startTime.flatMap({ FlexibleDateFormatter.parseInTimeZone($0, timeZone: tz) }) ?? Date.distantFuture
                     return dateA < dateB
                 }
 
             var chainCoords = [pickupCoord]
-            for relatedItem in related {
-                if let coord = itemCoordMap[relatedItem.id] {
-                    chainCoords.append(coord)
+            for idx in related.indices {
+                guard let coord = itemCoordMap[related[idx].id] else { continue }
+                if idx > 0,
+                   let bridgingHotel = hotelBridging(related[idx - 1], related[idx], timeZones: itemTimeZones, coordMap: itemCoordMap) {
+                    chainCoords.append(bridgingHotel)
                 }
+                chainCoords.append(coord)
             }
             chainCoords.append(dropoffCoord)
 
@@ -195,6 +209,64 @@ struct TripMapView: View {
             }
         }
 
+        let excludedFromHotel = Set([ItemType.flight, .rentalCar])
+
+        for hotel in items where hotel.itemType == .hotel {
+            guard let hotelCoord = itemCoordMap[hotel.id] else { continue }
+
+            let hotelTZ = itemTimeZones[hotel.id] ?? TimeZone.current
+            let hotelStart = hotel.startTime.flatMap { FlexibleDateFormatter.parseInTimeZone($0, timeZone: hotelTZ) }
+            let hotelEnd = hotel.endTime.flatMap { FlexibleDateFormatter.parseInTimeZone($0, timeZone: hotelTZ) }
+
+            let related = items
+                .filter { $0.id != hotel.id }
+                .filter { !excludedFromHotel.contains($0.itemType) }
+                .filter { item in
+                    guard let hs = hotelStart,
+                          let itemStart = item.startTime.flatMap({ FlexibleDateFormatter.parseInTimeZone($0, timeZone: itemTimeZones[item.id] ?? TimeZone.current) }) else { return false }
+                    if let he = hotelEnd {
+                        return itemStart >= hs && itemStart <= he
+                    }
+                    return itemStart >= hs
+                }
+                .sorted { a, b in
+                    if let orderA = a.displayOrder, let orderB = b.displayOrder {
+                        return orderA < orderB
+                    }
+                    if a.displayOrder != nil { return true }
+                    if b.displayOrder != nil { return false }
+                    let tz = itemTimeZones[a.id] ?? TimeZone.current
+                    let dateA = a.startTime.flatMap({ FlexibleDateFormatter.parseInTimeZone($0, timeZone: tz) }) ?? Date.distantFuture
+                    let dateB = b.startTime.flatMap({ FlexibleDateFormatter.parseInTimeZone($0, timeZone: tz) }) ?? Date.distantFuture
+                    return dateA < dateB
+                }
+
+            guard !related.isEmpty else { continue }
+
+            var coords = [hotelCoord]
+            for relatedItem in related {
+                if let coord = itemCoordMap[relatedItem.id] {
+                    coords.append(coord)
+                    coords.append(hotelCoord)
+                }
+            }
+
+            for i in 0..<(coords.count - 1) {
+                let start = coords[i]
+                let end = coords[i + 1]
+                let rKey = "hotel-\(hotel.id)-\(i)"
+                if !routeKeys.contains(rKey) {
+                    routeKeys.insert(rKey)
+                    routeList.append(RouteOverlay(
+                        id: rKey,
+                        start: start,
+                        end: end,
+                        color: color(for: .hotel)
+                    ))
+                }
+            }
+        }
+
         annotations = Array(grouped.values)
         routes = routeList
 
@@ -208,6 +280,67 @@ struct TripMapView: View {
                 span: MKCoordinateSpan(latitudeDelta: 2, longitudeDelta: 2)
             ))
         }
+    }
+
+    private func buildItemTimeZones(from coordMap: [String: CLLocationCoordinate2D]) -> [String: TimeZone] {
+        var result: [String: TimeZone] = [:]
+        for (itemId, coord) in coordMap {
+            let offset = Int(round(coord.longitude / 15.0))
+            if let tz = TimeZone(secondsFromGMT: offset * 3600) {
+                result[itemId] = tz
+            }
+        }
+        // Fall back to offset inference for items without coordinates
+        let pattern = try! Regex(#"([+-]\d{2}):(\d{2})$"#)
+        for item in items where result[item.id] == nil {
+            for ts in [item.startTime, item.endTime].compactMap({ $0 }) {
+                if let match = ts.firstMatch(of: pattern),
+                   let hours = Int(match[1].substring ?? ""),
+                   let minutes = Int(match[2].substring ?? "") {
+                    let totalSeconds = hours * 3600 + (hours < 0 ? -minutes : minutes) * 60
+                    if let tz = TimeZone(secondsFromGMT: totalSeconds) {
+                        result[item.id] = tz
+                        break
+                    }
+                }
+            }
+        }
+        return result
+    }
+
+    private func hotelBridging(
+        _ a: ItineraryItem, _ b: ItineraryItem,
+        timeZones: [String: TimeZone],
+        coordMap: [String: CLLocationCoordinate2D]
+    ) -> CLLocationCoordinate2D? {
+        let tzA = (a.startTime ?? a.endTime).flatMap { extractOffsetTZ($0) }
+            ?? timeZones[a.id] ?? TimeZone.current
+        let tzB = (b.startTime ?? b.endTime).flatMap { extractOffsetTZ($0) }
+            ?? timeZones[b.id] ?? TimeZone.current
+        guard let dateA = (a.startTime ?? a.endTime).flatMap({ FlexibleDateFormatter.parseInTimeZone($0, timeZone: tzA) }),
+              let dateB = (b.startTime ?? b.endTime).flatMap({ FlexibleDateFormatter.parseInTimeZone($0, timeZone: tzB) }),
+              !Calendar.current.isDate(dateA, inSameDayAs: dateB) else { return nil }
+
+        for hotel in items where hotel.itemType == .hotel {
+            guard let hotelCoord = coordMap[hotel.id] else { continue }
+            let tzH = (hotel.startTime ?? hotel.endTime).flatMap { extractOffsetTZ($0) }
+                ?? timeZones[hotel.id] ?? TimeZone.current
+            guard let hs = hotel.startTime.flatMap({ FlexibleDateFormatter.parseInTimeZone($0, timeZone: tzH) }) else { continue }
+            let he = hotel.endTime.flatMap({ FlexibleDateFormatter.parseInTimeZone($0, timeZone: tzH) }) ?? hs.addingTimeInterval(86400)
+            if dateA <= he && dateB >= hs {
+                return hotelCoord
+            }
+        }
+        return nil
+    }
+
+    private func extractOffsetTZ(_ string: String) -> TimeZone? {
+        let pattern = try! Regex(#"([+-]\d{2}):(\d{2})$"#)
+        guard let match = string.firstMatch(of: pattern),
+              let hours = Int(match[1].substring ?? ""),
+              let minutes = Int(match[2].substring ?? "") else { return nil }
+        let seconds = hours * 3600 + (hours < 0 ? -minutes : minutes) * 60
+        return TimeZone(secondsFromGMT: seconds)
     }
 
     private func buildItemCoordMap(from grouped: [String: ItemAnnotation]) -> [String: CLLocationCoordinate2D] {
@@ -270,7 +403,7 @@ struct TripMapView: View {
         case .rentalCar: return .green
         case .train: return .teal
         case .event: return .red
-        case .generic, .unknown: return .gray
+        case .generic, .expense, .unknown: return .gray
         }
     }
 }
@@ -301,6 +434,7 @@ struct ItemDetailSheet: View {
 
     @State private var showEdit = false
     @State private var showSourcePDF = false
+    @State private var showNavigate = false
 
     var body: some View {
         Form {
@@ -388,6 +522,11 @@ struct ItemDetailSheet: View {
                 if let code = item.location.airportCode {
                     LabeledContent("Airport", value: code)
                 }
+                Button {
+                    showNavigate = true
+                } label: {
+                    Label("Navigate", systemImage: "location.fill")
+                }
             }
 
             if let endLoc = item.endLocation {
@@ -447,6 +586,13 @@ struct ItemDetailSheet: View {
                     Image(systemName: "pencil")
                 }
             }
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    showNavigate = true
+                } label: {
+                    Image(systemName: "arrow.triangle.turn.up.right.diamond")
+                }
+            }
             if SourceDocumentStore.exists(for: item.id) {
                 ToolbarItem(placement: .secondaryAction) {
                     Button {
@@ -470,6 +616,64 @@ struct ItemDetailSheet: View {
                 PDFPreviewView(url: url)
             }
         }
+        .confirmationDialog("Navigate with", isPresented: $showNavigate, titleVisibility: .visible) {
+            if let url = appleMapsURL() {
+                Button("Apple Maps") { UIApplication.shared.open(url) }
+            }
+            if let url = googleMapsURL() {
+                Button("Google Maps") { UIApplication.shared.open(url) }
+            }
+            if let url = wazeURL() {
+                Button("Waze") { UIApplication.shared.open(url) }
+            }
+        }
+    }
+
+    private func destinationQuery() -> String {
+        if let lat = item.location.latitude, let lng = item.location.longitude {
+            return "\(lat),\(lng)"
+        }
+        if let address = item.location.address {
+            return address.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? address
+        }
+        if let name = item.location.name {
+            return name.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? name
+        }
+        return ""
+    }
+
+    private func destinationName() -> String {
+        (item.location.name ?? item.location.address ?? "Destination")
+            .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "Destination"
+    }
+
+    private func appleMapsURL() -> URL? {
+        let query = destinationQuery()
+        guard !query.isEmpty else { return nil }
+        if item.location.latitude != nil {
+            return URL(string: "https://maps.apple.com/?daddr=\(query)&q=\(destinationName())")
+        }
+        return URL(string: "https://maps.apple.com/?q=\(query)")
+    }
+
+    private func googleMapsURL() -> URL? {
+        guard UIApplication.shared.canOpenURL(URL(string: "comgooglemaps://")!) else { return nil }
+        let query = destinationQuery()
+        guard !query.isEmpty else { return nil }
+        if item.location.latitude != nil {
+            return URL(string: "comgooglemaps://?daddr=\(query)&navigate=yes")
+        }
+        return URL(string: "comgooglemaps://?q=\(query)")
+    }
+
+    private func wazeURL() -> URL? {
+        guard UIApplication.shared.canOpenURL(URL(string: "waze://")!) else { return nil }
+        if let lat = item.location.latitude, let lng = item.location.longitude {
+            return URL(string: "waze://?ll=\(lat),\(lng)&navigate=yes")
+        }
+        let query = destinationQuery()
+        guard !query.isEmpty else { return nil }
+        return URL(string: "waze://?q=\(query)")
     }
 
     private var confidenceColor: Color {

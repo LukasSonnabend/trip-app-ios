@@ -25,9 +25,17 @@ final class ItemsViewModel: ObservableObject {
         defer { isLoading = false }
 
         do {
-            let fetched: [ItineraryItem] = try await client.request("GET", "trips/\(tripId)/items")
+            var fetched: [ItineraryItem] = try await client.request("GET", "trips/\(tripId)/items")
+            let existingOrders = items.reduce(into: [String: Int]()) {
+                if let order = $1.displayOrder { $0[$1.id] = order }
+            }
+            for i in fetched.indices where fetched[i].displayOrder == nil {
+                if let order = existingOrders[fetched[i].id] {
+                    fetched[i].displayOrder = order
+                }
+            }
             items = sortItems(fetched)
-            saveCachedItems(fetched, key: key)
+            saveCachedItems(items, key: key)
         } catch {
             if error.isCancellationError { return }
             if items.isEmpty {
@@ -116,6 +124,42 @@ final class ItemsViewModel: ObservableObject {
         }
     }
 
+    func splitPrice(tripId: String, originItem: ItineraryItem) async {
+        guard let priceStr = originItem.price else { return }
+        let numeric = priceStr
+            .replacingOccurrences(of: ",", with: "")
+            .filter { $0.isNumber || $0 == "." }
+        guard let total = Double(numeric), total > 0 else { return }
+        let currencyPrefix = String(priceStr.prefix { !$0.isNumber && $0 != " " && $0 != "," })
+
+        let siblings: [ItineraryItem]
+        if let code = originItem.confirmationCode {
+            siblings = items.filter { $0.confirmationCode == code && $0.price != nil }
+        } else {
+            siblings = [originItem]
+        }
+        guard siblings.count > 1 else { return }
+
+        let share = total / Double(siblings.count)
+        let newPrice = currencyPrefix + String(format: "%.2f", share)
+
+        for sibling in siblings {
+            do {
+                let body = ItemUpdateBody(price: newPrice)
+                let updated: ItineraryItem = try await client.request(
+                    "PATCH", "trips/\(tripId)/items/\(sibling.id)", body: body
+                )
+                if let idx = items.firstIndex(where: { $0.id == sibling.id }) {
+                    items[idx] = updated
+                }
+            } catch {
+                if error.isCancellationError { return }
+                errorMessage = error.localizedDescription
+                return
+            }
+        }
+    }
+
     func extract(
         tripId: String,
         content: String?,
@@ -144,6 +188,46 @@ final class ItemsViewModel: ObservableObject {
         }
     }
 
+    func reorderItems(tripId: String, from source: IndexSet, to destination: Int) {
+        var mutable = items
+        let moving = source.map { mutable[$0] }
+        let adjustedDestination = destination > source.first ?? 0 ? destination - source.count : destination
+        for offset in source.sorted(by: >) {
+            mutable.remove(at: offset)
+        }
+        mutable.insert(contentsOf: moving, at: min(adjustedDestination, mutable.count))
+        items = mutable
+        saveCurrentItems(tripId: tripId)
+        persistOrder(tripId: tripId)
+    }
+
+    private func persistOrder(tripId: String) {
+        for i in items.indices {
+            items[i].displayOrder = i
+        }
+        saveCurrentItems(tripId: tripId)
+
+        let current = items
+        Task {
+            for (index, item) in current.enumerated() {
+                let body = ItemUpdateBody(displayOrder: index)
+                do {
+                    let updated: ItineraryItem = try await client.request(
+                        "PATCH", "trips/\(tripId)/items/\(item.id)", body: body
+                    )
+                    if let idx = items.firstIndex(where: { $0.id == updated.id }) {
+                        items[idx] = updated
+                    }
+                } catch {
+                    if !error.isCancellationError {
+                        errorMessage = "Failed to save order: \(error.localizedDescription)"
+                    }
+                }
+            }
+            saveCurrentItems(tripId: tripId)
+        }
+    }
+
     // MARK: - Cache
 
     private func cacheKey(for tripId: String) -> String {
@@ -167,6 +251,11 @@ final class ItemsViewModel: ObservableObject {
 
     func sortItems(_ unsorted: [ItineraryItem]) -> [ItineraryItem] {
         unsorted.sorted { a, b in
+            if let orderA = a.displayOrder, let orderB = b.displayOrder {
+                return orderA < orderB
+            }
+            if a.displayOrder != nil { return true }
+            if b.displayOrder != nil { return false }
             let dateA = (a.startTime ?? a.endTime).flatMap(FlexibleDateFormatter.parseLocal(_:))
             let dateB = (b.startTime ?? b.endTime).flatMap(FlexibleDateFormatter.parseLocal(_:))
             switch (dateA, dateB) {

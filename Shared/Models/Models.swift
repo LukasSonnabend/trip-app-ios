@@ -155,6 +155,7 @@ enum ItemType: String, Codable, CaseIterable {
     case train = "TRAIN"
     case event = "EVENT"
     case generic = "GENERIC"
+    case expense = "EXPENSE"
     case unknown
 
     var displayName: String {
@@ -166,6 +167,7 @@ enum ItemType: String, Codable, CaseIterable {
         case .train: return "Train"
         case .event: return "Event"
         case .generic: return "Other"
+        case .expense: return "Expense"
         case .unknown: return "Unknown"
         }
     }
@@ -179,6 +181,7 @@ enum ItemType: String, Codable, CaseIterable {
         case .train: return "tram"
         case .event: return "calendar"
         case .generic: return "mappin"
+        case .expense: return "dollarsign.circle"
         case .unknown: return "questionmark"
         }
     }
@@ -265,6 +268,7 @@ struct ItineraryItem: Codable, Identifiable {
     let legs: [Leg]
     let confidence: String?
     let details: ItemDetails
+    var displayOrder: Int?
 
     enum CodingKeys: String, CodingKey {
         case id, title, provider, location, details, price, legs, confidence
@@ -276,6 +280,7 @@ struct ItineraryItem: Codable, Identifiable {
         case endTime = "end_time"
         case endLocation = "end_location"
         case returnLocation = "return_location"
+        case displayOrder = "display_order"
     }
 }
 

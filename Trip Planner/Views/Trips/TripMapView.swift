@@ -100,13 +100,18 @@ struct TripMapView: View {
             var firstCoordForItem = true
 
             for (loc, isEnd) in locs {
-                let (coord, isNew) = await resolveCoordinate(for: loc)
+                let (coord, isNew, resolvedName, resolvedAddress) = await resolveCoordinate(for: loc)
                 guard let coord else { continue }
 
                 if isNew {
                     let key = isEnd ? "end_\(item.id)" : item.id
                     coordinateUpdates[key] = ItemCoordinateUpdate(
-                        location: ItemCoordinateUpdate.CoordinateData(latitude: coord.latitude, longitude: coord.longitude),
+                        location: ItemCoordinateUpdate.CoordinateData(
+                            latitude: coord.latitude,
+                            longitude: coord.longitude,
+                            name: resolvedName,
+                            address: resolvedAddress
+                        ),
                         endLocation: nil
                     )
                 }
@@ -353,31 +358,34 @@ struct TripMapView: View {
         return map
     }
 
-    private func resolveCoordinate(for location: Location) async -> (CLLocationCoordinate2D?, Bool) {
+    private func resolveCoordinate(for location: Location) async -> (CLLocationCoordinate2D?, Bool, String?, String?) {
         if let lat = location.latitude, let lng = location.longitude {
-            return (CLLocationCoordinate2D(latitude: lat, longitude: lng), false)
+            return (CLLocationCoordinate2D(latitude: lat, longitude: lng), false, nil, nil)
         }
-        let coord = await geocode(location: location)
-        return (coord, coord != nil)
+        let result = await geocode(location: location)
+        return (result.coord, result.coord != nil, result.name, result.address)
     }
 
-    private func geocode(location: Location) async -> CLLocationCoordinate2D? {
+    private func geocode(location: Location) async -> (coord: CLLocationCoordinate2D?, name: String?, address: String?) {
         let query: String = {
             if let address = location.address { return address }
             if let name = location.name { return name }
             return ""
         }()
-        guard !query.isEmpty else { return nil }
+        guard !query.isEmpty else { return (nil, nil, nil) }
         do {
             let request = MKLocalSearch.Request()
             request.naturalLanguageQuery = query
             let search = MKLocalSearch(request: request)
             let response = try await search.start()
             if let first = response.mapItems.first {
-                return first.location.coordinate
+                let place = first.placemark
+                let addr = [place.thoroughfare, place.locality, place.administrativeArea, place.country]
+                    .compactMap { $0 }.joined(separator: ", ")
+                return (first.placemark.coordinate, place.name, addr.isEmpty ? nil : addr)
             }
         } catch {}
-        return nil
+        return (nil, nil, nil)
     }
 
     private func persistCoordinates(_ updates: [String: ItemCoordinateUpdate]) async {

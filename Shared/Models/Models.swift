@@ -293,6 +293,8 @@ struct ItemCoordinateUpdate: Codable {
     struct CoordinateData: Codable {
         let latitude: Double
         let longitude: Double
+        var name: String? = nil
+        var address: String? = nil
     }
 
     enum CodingKeys: String, CodingKey {

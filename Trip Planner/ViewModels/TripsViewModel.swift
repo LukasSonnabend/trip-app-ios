@@ -14,6 +14,7 @@ final class TripsViewModel: ObservableObject {
     func loadTrips() async {
         isLoading = true
         errorMessage = nil
+        defer { isLoading = false }
         do {
             trips = try await client.request("GET", "trips")
         } catch {
@@ -21,12 +22,12 @@ final class TripsViewModel: ObservableObject {
             if case APIError.unauthenticated = error { return }
             errorMessage = error.localizedDescription
         }
-        isLoading = false
     }
 
     func createTrip(name: String) async {
         isLoading = true
         errorMessage = nil
+        defer { isLoading = false }
         do {
             let response: CreateTripResponse = try await client.request(
                 "POST", "trips",
@@ -38,13 +39,13 @@ final class TripsViewModel: ObservableObject {
             if error.isCancellationError { return }
             errorMessage = error.localizedDescription
         }
-        isLoading = false
     }
 
     func loadTrip(id: String) async {
         isLoading = true
         errorMessage = nil
         tripDetail = nil
+        defer { isLoading = false }
         do {
             tripDetail = try await client.request("GET", "trips/\(id)")
         } catch {
@@ -55,19 +56,18 @@ final class TripsViewModel: ObservableObject {
                 errorMessage = error.localizedDescription
             }
         }
-        isLoading = false
     }
 
     func createInvite(tripId: String) async {
         isLoading = true
         errorMessage = nil
+        defer { isLoading = false }
         do {
             inviteCode = try await client.request("POST", "trips/\(tripId)/invites")
         } catch {
             if error.isCancellationError { return }
             errorMessage = error.localizedDescription
         }
-        isLoading = false
     }
 
     func revokeInvite(tripId: String, code: String) async {

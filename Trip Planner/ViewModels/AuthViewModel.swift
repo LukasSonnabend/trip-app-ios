@@ -20,6 +20,7 @@ final class AuthViewModel: ObservableObject {
     func login() async {
         isLoading = true
         errorMessage = nil
+        defer { isLoading = false }
         do {
             let response: AuthResponse = try await client.request(
                 "POST", "auth/login",
@@ -33,12 +34,12 @@ final class AuthViewModel: ObservableObject {
             if error.isCancellationError { return }
             errorMessage = error.localizedDescription
         }
-        isLoading = false
     }
 
     func signup() async {
         isLoading = true
         errorMessage = nil
+        defer { isLoading = false }
         do {
             let response: AuthResponse = try await client.request(
                 "POST", "auth/signup",
@@ -52,7 +53,6 @@ final class AuthViewModel: ObservableObject {
             if error.isCancellationError { return }
             errorMessage = error.localizedDescription
         }
-        isLoading = false
     }
 
     func logout() async {

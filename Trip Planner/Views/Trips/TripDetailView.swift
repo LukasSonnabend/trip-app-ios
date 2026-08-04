@@ -255,20 +255,32 @@ struct ItemCard: View {
             }
 
             if let start = item.startTime {
-                Text(FlexibleDateFormatter.displayString(start))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                HStack(spacing: 4) {
+                    Text(FlexibleDateFormatter.displayString(start))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    if let end = item.endTime {
+                        Text("→")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Text(FlexibleDateFormatter.displayString(end))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
 
             if !item.legs.isEmpty {
+                routeSummary
+
                 Button {
                     withAnimation { expanded.toggle() }
                 } label: {
-                    HStack {
+                    HStack(spacing: 4) {
                         Image(systemName: expanded ? "chevron.up" : "chevron.down")
-                            .font(.caption)
-                        Text("\(item.legs.count) leg\(item.legs.count == 1 ? "" : "s")")
-                            .font(.caption)
+                            .font(.caption2)
+                        Text(expanded ? "Hide details" : "Show details")
+                            .font(.caption2)
                         Spacer()
                     }
                     .foregroundStyle(.secondary)
@@ -318,6 +330,43 @@ struct ItemCard: View {
             }
         }
     }
+
+    private var routeSummary: some View {
+        HStack(spacing: 6) {
+            if let from = item.location.airportCode {
+                Text(from)
+                    .font(.caption)
+                    .fontWeight(.medium)
+            } else if let name = item.location.name {
+                Text(name)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            if item.endLocation?.airportCode != nil || item.endLocation?.name != nil {
+                Image(systemName: "arrow.right")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                if let to = item.endLocation?.airportCode {
+                    Text(to)
+                        .font(.caption)
+                        .fontWeight(.medium)
+                } else if let name = item.endLocation?.name {
+                    Text(name)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            if item.legs.count > 1 {
+                Text("·")
+                    .foregroundStyle(.secondary)
+                Text("\(item.legs.count - 1) stop\(item.legs.count - 1 > 1 ? "s" : "")")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
 }
 
 struct LegRow: View {
@@ -330,9 +379,18 @@ struct LegRow: View {
                     Text("\(dep) → \(arr)")
                         .font(.caption)
                         .fontWeight(.medium)
+                } else if let depName = leg.departureLocation.name, let arrName = leg.arrivalLocation.name {
+                    Text("\(depName) → \(arrName)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
                 if let start = leg.startTime {
                     Text(FlexibleDateFormatter.displayString(start))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                if let end = leg.endTime {
+                    Text("Arr: \(FlexibleDateFormatter.displayString(end))")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
@@ -342,6 +400,9 @@ struct LegRow: View {
                 Text(seat)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 4))
             }
         }
         .padding(.leading, 32)

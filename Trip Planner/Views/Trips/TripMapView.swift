@@ -234,6 +234,16 @@ struct ItemDetailSheet: View {
                 if let price = item.price {
                     LabeledContent("Price", value: price)
                 }
+                if let confidence = item.confidence {
+                    LabeledContent("Confidence") {
+                        HStack(spacing: 4) {
+                            Circle()
+                                .fill(confidenceColor)
+                                .frame(width: 8, height: 8)
+                            Text(confidence.capitalized)
+                        }
+                    }
+                }
             }
 
             Section("Time") {
@@ -318,19 +328,17 @@ struct ItemDetailSheet: View {
                 }
             }
 
-            if let seat = item.details.seat {
+            if item.details.seat != nil || item.details.gate != nil || item.details.roomType != nil {
                 Section("Details") {
-                    LabeledContent("Seat", value: seat)
-                }
-            }
-            if let gate = item.details.gate {
-                Section("Details") {
-                    LabeledContent("Gate", value: gate)
-                }
-            }
-            if let room = item.details.roomType {
-                Section("Details") {
-                    LabeledContent("Room", value: room)
+                    if let seat = item.details.seat {
+                        LabeledContent("Seat", value: seat)
+                    }
+                    if let gate = item.details.gate {
+                        LabeledContent("Gate", value: gate)
+                    }
+                    if let room = item.details.roomType {
+                        LabeledContent("Room", value: room)
+                    }
                 }
             }
             if let notes = item.details.notes {
@@ -371,6 +379,15 @@ struct ItemDetailSheet: View {
             if let url = SourceDocumentStore.url(for: item.id) {
                 PDFPreviewView(url: url)
             }
+        }
+    }
+
+    private var confidenceColor: Color {
+        switch item.confidence {
+        case "high": return .green
+        case "medium": return .orange
+        case "low": return .red
+        default: return .gray
         }
     }
 }

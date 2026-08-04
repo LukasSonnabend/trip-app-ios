@@ -203,8 +203,8 @@ final class ItemsViewModel: ObservableObject {
 
     func sortItems(_ unsorted: [ItineraryItem]) -> [ItineraryItem] {
         unsorted.sorted { a, b in
-            let dateA = a.startTime.flatMap(FlexibleDateFormatter.parse(_:))
-            let dateB = b.startTime.flatMap(FlexibleDateFormatter.parse(_:))
+            let dateA = (a.startTime ?? a.endTime).flatMap(FlexibleDateFormatter.parseLocal(_:))
+            let dateB = (b.startTime ?? b.endTime).flatMap(FlexibleDateFormatter.parseLocal(_:))
             switch (dateA, dateB) {
             case (let da?, let db?): return da < db
             case (nil, _): return false

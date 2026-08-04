@@ -37,6 +37,12 @@ enum FlexibleDateFormatter {
         return nil
     }
 
+    static func parseLocal(_ string: String) -> Date? {
+        let stripped = string
+            .replacingOccurrences(of: #"(Z|[+-]\d{2}(:?\d{2})?)$"#, with: "", options: .regularExpression)
+        return parse(stripped)
+    }
+
     static func displayString(_ string: String) -> String {
         guard let date = parse(string) else { return string }
 

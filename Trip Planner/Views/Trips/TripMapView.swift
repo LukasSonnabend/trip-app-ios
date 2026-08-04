@@ -43,10 +43,6 @@ struct TripMapView: View {
         }
     }
 
-    private func shouldShowRoute(for type: ItemType) -> Bool {
-        type == .flight || type == .rentalCar
-    }
-
     private func geocodeItems() async {
         var grouped: [String: ItemAnnotation] = [:]
         var routeKeys: Set<String> = []
@@ -54,6 +50,7 @@ struct TripMapView: View {
         var coordinateUpdates: [String: ItemCoordinateUpdate] = [:]
         var itemPickupCoords: [String: CLLocationCoordinate2D] = [:]
         var itemDropoffCoords: [String: CLLocationCoordinate2D] = [:]
+        let rentalCarIds = Set(items.filter { $0.itemType == .rentalCar }.map(\.id))
 
         for item in items {
             let locs: [(Location, Bool)] = if !item.legs.isEmpty {
@@ -108,7 +105,7 @@ struct TripMapView: View {
                 }
                 if isEnd {
                     itemDropoffCoords[item.id] = coord
-                    if let start = legStartCoord {
+                    if let start = legStartCoord, !rentalCarIds.contains(item.id) {
                         let rKey = "\(coordinateKey(start))->\(key)"
                         if !routeKeys.contains(rKey) {
                             routeKeys.insert(rKey)
@@ -129,19 +126,21 @@ struct TripMapView: View {
 
         for car in items where car.itemType == .rentalCar {
             guard let pickupCoord = itemPickupCoords[car.id],
-                  let dropoffCoord = itemDropoffCoords[car.id],
-                  let carStart = car.startTime.flatMap(FlexibleDateFormatter.parse(_:)),
-                  let carEnd = car.endTime.flatMap(FlexibleDateFormatter.parse(_:)) else { continue }
+                  let dropoffCoord = itemDropoffCoords[car.id] else { continue }
+
+            let carStart = car.startTime.flatMap(FlexibleDateFormatter.parseLocal(_:))
+            let carEnd = car.endTime.flatMap(FlexibleDateFormatter.parseLocal(_:))
 
             let related = items
                 .filter { $0.id != car.id }
                 .filter { item in
-                    guard let start = item.startTime.flatMap(FlexibleDateFormatter.parse(_:)) else { return false }
-                    return start >= carStart && start <= carEnd
+                    guard let cs = carStart, let ce = carEnd,
+                          let start = item.startTime.flatMap(FlexibleDateFormatter.parseLocal(_:)) else { return false }
+                    return start >= cs && start <= ce
                 }
                 .sorted { a, b in
-                    let dateA = a.startTime.flatMap(FlexibleDateFormatter.parse(_:)) ?? Date.distantFuture
-                    let dateB = b.startTime.flatMap(FlexibleDateFormatter.parse(_:)) ?? Date.distantFuture
+                    let dateA = a.startTime.flatMap(FlexibleDateFormatter.parseLocal(_:)) ?? Date.distantFuture
+                    let dateB = b.startTime.flatMap(FlexibleDateFormatter.parseLocal(_:)) ?? Date.distantFuture
                     return dateA < dateB
                 }
 

@@ -194,9 +194,11 @@ struct Location: Codable {
     let name: String?
     let address: String?
     let airportCode: String?
+    let latitude: Double?
+    let longitude: Double?
 
     enum CodingKeys: String, CodingKey {
-        case name, address
+        case name, address, latitude, longitude
         case airportCode = "airport_code"
     }
 }
@@ -225,6 +227,7 @@ struct ItineraryItem: Codable, Identifiable {
     let startTime: String?
     let endTime: String?
     let location: Location
+    let endLocation: Location?
     let details: ItemDetails
 
     enum CodingKeys: String, CodingKey {
@@ -235,6 +238,24 @@ struct ItineraryItem: Codable, Identifiable {
         case travelerName = "traveler_name"
         case startTime = "start_time"
         case endTime = "end_time"
+        case endLocation = "end_location"
+    }
+}
+
+// MARK: - Item Coordinate Update
+
+struct ItemCoordinateUpdate: Codable {
+    let location: CoordinateData
+    let endLocation: CoordinateData?
+
+    struct CoordinateData: Codable {
+        let latitude: Double
+        let longitude: Double
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case location
+        case endLocation = "end_location"
     }
 }
 

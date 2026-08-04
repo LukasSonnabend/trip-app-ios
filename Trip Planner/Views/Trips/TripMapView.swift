@@ -4,8 +4,10 @@ import MapKit
 struct TripMapView: View {
     let items: [ItineraryItem]
     let tripName: String
+    let tripId: String
 
     @State private var annotations: [ItemAnnotation] = []
+    @State private var routes: [RouteOverlay] = []
     @State private var selectedItem: ItineraryItem?
     @State private var camera: MapCameraPosition = .automatic
     @State private var selection: String?
@@ -13,9 +15,13 @@ struct TripMapView: View {
     var body: some View {
         Map(position: $camera, selection: $selection) {
             ForEach(annotations) { annotation in
-                Marker(annotation.item.title, systemImage: annotation.item.itemType.iconName, coordinate: annotation.coordinate)
-                    .tint(color(for: annotation.item.itemType))
+                Marker(annotation.title, systemImage: annotation.iconName, coordinate: annotation.coordinate)
+                    .tint(annotation.color)
                     .tag(annotation.id)
+            }
+            ForEach(routes) { route in
+                MapPolyline(coordinates: [route.start, route.end])
+                    .stroke(route.color, lineWidth: 2)
             }
         }
         .mapStyle(.standard(elevation: .realistic))
@@ -23,13 +29,13 @@ struct TripMapView: View {
         .navigationBarTitleDisplayMode(.inline)
         .sheet(item: $selectedItem) { item in
             NavigationStack {
-                ItemDetailSheet(item: item)
+                ItemDetailSheet(item: item, tripId: tripId)
             }
             .presentationDetents([.medium])
         }
         .onChange(of: selection) { _, id in
             if let annotation = annotations.first(where: { $0.id == id }) {
-                selectedItem = annotation.item
+                selectedItem = annotation.representativeItem
             }
         }
         .task {
@@ -37,40 +43,138 @@ struct TripMapView: View {
         }
     }
 
+    private func shouldShowRoute(for type: ItemType) -> Bool {
+        type == .flight || type == .rentalCar
+    }
+
     private func geocodeItems() async {
-        let geocoder = CLGeocoder()
-        var results: [ItemAnnotation] = []
+        var grouped: [String: ItemAnnotation] = [:]
+        var routeKeys: Set<String> = []
+        var routeList: [RouteOverlay] = []
+        var coordinateUpdates: [String: ItemCoordinateUpdate] = [:]
 
         for item in items {
-            let query: String = {
-                if let address = item.location.address { return address }
-                if let name = item.location.name { return name }
-                return ""
-            }()
+            let (startCoord, startNew) = await resolveCoordinate(for: item.location)
+            let hasRoute = shouldShowRoute(for: item.itemType) && item.endLocation != nil
+            let (endCoord, endNew): (CLLocationCoordinate2D?, Bool) = if hasRoute, let endLoc = item.endLocation {
+                await resolveCoordinate(for: endLoc)
+            } else { (nil, false) }
 
-            guard !query.isEmpty else { continue }
+            if startNew || endNew, let start = startCoord {
+                coordinateUpdates[item.id] = ItemCoordinateUpdate(
+                    location: ItemCoordinateUpdate.CoordinateData(
+                        latitude: start.latitude,
+                        longitude: start.longitude
+                    ),
+                    endLocation: endCoord.map {
+                        ItemCoordinateUpdate.CoordinateData(latitude: $0.latitude, longitude: $0.longitude)
+                    }
+                )
+            }
 
-            do {
-                let placemarks = try await geocoder.geocodeAddressString(query)
-                if let placemark = placemarks.first, let location = placemark.location {
-                    results.append(ItemAnnotation(
-                        id: item.id,
-                        item: item,
-                        coordinate: location.coordinate
-                    ))
+            if let start = startCoord {
+                let key = coordinateKey(start)
+                if var existing = grouped[key] {
+                    existing.items.append(item)
+                    grouped[key] = existing
+                } else {
+                    grouped[key] = ItemAnnotation(
+                        id: key,
+                        items: [item],
+                        coordinate: start,
+                        title: item.title,
+                        iconName: item.itemType.iconName,
+                        color: color(for: item.itemType)
+                    )
                 }
-            } catch {
-                continue
+            }
+
+            if let end = endCoord {
+                let key = coordinateKey(end)
+                if var existing = grouped[key] {
+                    existing.items.append(item)
+                    grouped[key] = existing
+                } else {
+                    grouped[key] = ItemAnnotation(
+                        id: key,
+                        items: [item],
+                        coordinate: end,
+                        title: item.title,
+                        iconName: item.itemType.iconName,
+                        color: color(for: item.itemType)
+                    )
+                }
+
+                if let start = startCoord {
+                    let rKey = "\(coordinateKey(start))->\(coordinateKey(end))"
+                    if !routeKeys.contains(rKey) {
+                        routeKeys.insert(rKey)
+                        routeList.append(RouteOverlay(
+                            id: rKey,
+                            start: start,
+                            end: end,
+                            color: color(for: item.itemType)
+                        ))
+                    }
+                }
             }
         }
-        annotations = results
 
-        if let first = results.first {
+        annotations = Array(grouped.values)
+        routes = routeList
+
+        if !coordinateUpdates.isEmpty {
+            await persistCoordinates(coordinateUpdates)
+        }
+
+        if let first = annotations.first {
             camera = .region(MKCoordinateRegion(
                 center: first.coordinate,
                 span: MKCoordinateSpan(latitudeDelta: 2, longitudeDelta: 2)
             ))
         }
+    }
+
+    private func resolveCoordinate(for location: Location) async -> (CLLocationCoordinate2D?, Bool) {
+        if let lat = location.latitude, let lng = location.longitude {
+            return (CLLocationCoordinate2D(latitude: lat, longitude: lng), false)
+        }
+        let coord = await geocode(location: location)
+        return (coord, coord != nil)
+    }
+
+    private func geocode(location: Location) async -> CLLocationCoordinate2D? {
+        let query: String = {
+            if let address = location.address { return address }
+            if let name = location.name { return name }
+            return ""
+        }()
+        guard !query.isEmpty else { return nil }
+        do {
+            let request = MKLocalSearch.Request()
+            request.naturalLanguageQuery = query
+            let search = MKLocalSearch(request: request)
+            let response = try await search.start()
+            if let first = response.mapItems.first {
+                return first.location.coordinate
+            }
+        } catch {}
+        return nil
+    }
+
+    private func persistCoordinates(_ updates: [String: ItemCoordinateUpdate]) async {
+        let client = APIClient.shared
+        for (itemId, update) in updates {
+            try? await client.requestVoid(
+                "PATCH",
+                "trips/\(tripId)/items/\(itemId)",
+                body: update
+            )
+        }
+    }
+
+    private func coordinateKey(_ coord: CLLocationCoordinate2D) -> String {
+        String(format: "%.4f,%.4f", coord.latitude, coord.longitude)
     }
 
     private func color(for type: ItemType) -> Color {
@@ -88,12 +192,29 @@ struct TripMapView: View {
 
 struct ItemAnnotation: Identifiable {
     let id: String
-    let item: ItineraryItem
+    var items: [ItineraryItem]
     let coordinate: CLLocationCoordinate2D
+    let title: String
+    let iconName: String
+    let color: Color
+
+    var representativeItem: ItineraryItem {
+        items.first!
+    }
+}
+
+struct RouteOverlay: Identifiable {
+    let id: String
+    let start: CLLocationCoordinate2D
+    let end: CLLocationCoordinate2D
+    let color: Color
 }
 
 struct ItemDetailSheet: View {
     let item: ItineraryItem
+    let tripId: String
+
+    @State private var showEdit = false
 
     var body: some View {
         Form {
@@ -140,6 +261,20 @@ struct ItemDetailSheet: View {
                 }
             }
 
+            if let endLoc = item.endLocation {
+                Section("End Location") {
+                    if let name = endLoc.name {
+                        LabeledContent("Name", value: name)
+                    }
+                    if let address = endLoc.address {
+                        LabeledContent("Address", value: address)
+                    }
+                    if let code = endLoc.airportCode {
+                        LabeledContent("Airport", value: code)
+                    }
+                }
+            }
+
             if let seat = item.details.seat {
                 Section("Details") {
                     LabeledContent("Seat", value: seat)
@@ -163,6 +298,23 @@ struct ItemDetailSheet: View {
         }
         .navigationTitle(item.itemType.displayName)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    showEdit = true
+                } label: {
+                    Image(systemName: "pencil")
+                }
+            }
+        }
+        .sheet(isPresented: $showEdit) {
+            EditItemSheet(
+                item: item,
+                tripId: tripId,
+                onUpdate: { _ in showEdit = false },
+                onClose: { showEdit = false }
+            )
+        }
     }
 }
 
@@ -170,7 +322,8 @@ struct ItemDetailSheet: View {
     NavigationStack {
         TripMapView(
             items: [],
-            tripName: "Preview Trip"
+            tripName: "Preview Trip",
+            tripId: "preview"
         )
     }
 }

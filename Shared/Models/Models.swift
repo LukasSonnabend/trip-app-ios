@@ -215,6 +215,39 @@ struct ItemDetails: Codable {
     }
 }
 
+struct LegLocation: Codable {
+    let name: String?
+    let address: String?
+    let airportCode: String?
+
+    enum CodingKeys: String, CodingKey {
+        case name, address
+        case airportCode = "airport_code"
+    }
+}
+
+struct Leg: Codable, Identifiable {
+    var id: String { "\(departureAirportCode ?? "?")-\(arrivalAirportCode ?? "?")-\(startTime ?? "")" }
+
+    let departureAirportCode: String?
+    let arrivalAirportCode: String?
+    let startTime: String?
+    let endTime: String?
+    let departureLocation: LegLocation
+    let arrivalLocation: LegLocation
+    let seat: String?
+
+    enum CodingKeys: String, CodingKey {
+        case seat
+        case departureAirportCode = "departure_airport_code"
+        case arrivalAirportCode = "arrival_airport_code"
+        case startTime = "start_time"
+        case endTime = "end_time"
+        case departureLocation = "departure_location"
+        case arrivalLocation = "arrival_location"
+    }
+}
+
 struct ItineraryItem: Codable, Identifiable {
     let id: String
     let addedBy: String?
@@ -228,10 +261,12 @@ struct ItineraryItem: Codable, Identifiable {
     let endTime: String?
     let location: Location
     let endLocation: Location?
+    let returnLocation: Location?
+    let legs: [Leg]
     let details: ItemDetails
 
     enum CodingKeys: String, CodingKey {
-        case id, title, provider, location, details, price
+        case id, title, provider, location, details, price, legs
         case addedBy = "added_by"
         case itemType = "item_type"
         case confirmationCode = "confirmation_code"
@@ -239,6 +274,7 @@ struct ItineraryItem: Codable, Identifiable {
         case startTime = "start_time"
         case endTime = "end_time"
         case endLocation = "end_location"
+        case returnLocation = "return_location"
     }
 }
 

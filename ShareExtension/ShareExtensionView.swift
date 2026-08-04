@@ -128,16 +128,22 @@ final class ShareExtensionViewModel: ObservableObject {
 
     func extract(tripId: String) async {
         state = .extracting
+        let pdfData = sharedFile?.0
         do {
             let hasFile = sharedFile != nil
             let items: [ItineraryItem] = try await client.uploadMultipart(
                 "trips/\(tripId)/items/extract",
                 textContent: hasFile ? nil : sharedContent,
                 url: hasFile ? nil : sharedURL,
-                fileData: sharedFile?.0,
+                fileData: pdfData,
                 fileName: sharedFile?.1,
                 mimeType: sharedFile != nil ? "application/pdf" : nil
             )
+            if let data = pdfData {
+                for item in items {
+                    SourceDocumentStore.save(data: data, for: item.id)
+                }
+            }
             state = .result(items)
         } catch {
             if error.isCancellationError { return }

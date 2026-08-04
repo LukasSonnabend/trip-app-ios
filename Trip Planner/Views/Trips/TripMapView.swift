@@ -54,26 +54,37 @@ struct TripMapView: View {
         var coordinateUpdates: [String: ItemCoordinateUpdate] = [:]
 
         for item in items {
-            let (startCoord, startNew) = await resolveCoordinate(for: item.location)
-            let hasRoute = shouldShowRoute(for: item.itemType) && item.endLocation != nil
-            let (endCoord, endNew): (CLLocationCoordinate2D?, Bool) = if hasRoute, let endLoc = item.endLocation {
-                await resolveCoordinate(for: endLoc)
-            } else { (nil, false) }
-
-            if startNew || endNew, let start = startCoord {
-                coordinateUpdates[item.id] = ItemCoordinateUpdate(
-                    location: ItemCoordinateUpdate.CoordinateData(
-                        latitude: start.latitude,
-                        longitude: start.longitude
-                    ),
-                    endLocation: endCoord.map {
-                        ItemCoordinateUpdate.CoordinateData(latitude: $0.latitude, longitude: $0.longitude)
+            let locs: [(Location, Bool)] = if !item.legs.isEmpty {
+                item.legs.flatMap { leg -> [(Location, Bool)] in
+                    var results: [(Location, Bool)] = [
+                        (Location(name: leg.departureLocation.name, address: leg.departureLocation.address, airportCode: leg.departureAirportCode, latitude: nil, longitude: nil), false),
+                    ]
+                    if leg.arrivalAirportCode != nil {
+                        results.append((Location(name: leg.arrivalLocation.name, address: leg.arrivalLocation.address, airportCode: leg.arrivalAirportCode, latitude: nil, longitude: nil), true))
                     }
-                )
+                    return results
+                }
+            } else {
+                [(item.location, false)]
+                + [item.endLocation].compactMap { $0 }.map { ($0, true) }
+                + [item.returnLocation].compactMap { $0 }.map { ($0, true) }
             }
 
-            if let start = startCoord {
-                let key = coordinateKey(start)
+            var legStartCoord: CLLocationCoordinate2D?
+
+            for (loc, isEnd) in locs {
+                let (coord, isNew) = await resolveCoordinate(for: loc)
+                guard let coord else { continue }
+
+                if isNew {
+                    let key = isEnd ? "end_\(item.id)" : item.id
+                    coordinateUpdates[key] = ItemCoordinateUpdate(
+                        location: ItemCoordinateUpdate.CoordinateData(latitude: coord.latitude, longitude: coord.longitude),
+                        endLocation: nil
+                    )
+                }
+
+                let key = coordinateKey(coord)
                 if var existing = grouped[key] {
                     existing.items.append(item)
                     grouped[key] = existing
@@ -81,42 +92,26 @@ struct TripMapView: View {
                     grouped[key] = ItemAnnotation(
                         id: key,
                         items: [item],
-                        coordinate: start,
-                        title: item.title,
-                        iconName: item.itemType.iconName,
-                        color: color(for: item.itemType)
-                    )
-                }
-            }
-
-            if let end = endCoord {
-                let key = coordinateKey(end)
-                if var existing = grouped[key] {
-                    existing.items.append(item)
-                    grouped[key] = existing
-                } else {
-                    grouped[key] = ItemAnnotation(
-                        id: key,
-                        items: [item],
-                        coordinate: end,
+                        coordinate: coord,
                         title: item.title,
                         iconName: item.itemType.iconName,
                         color: color(for: item.itemType)
                     )
                 }
 
-                if let start = startCoord {
-                    let rKey = "\(coordinateKey(start))->\(coordinateKey(end))"
+                if let start = legStartCoord, isEnd {
+                    let rKey = "\(coordinateKey(start))->\(key)"
                     if !routeKeys.contains(rKey) {
                         routeKeys.insert(rKey)
                         routeList.append(RouteOverlay(
                             id: rKey,
                             start: start,
-                            end: end,
+                            end: coord,
                             color: color(for: item.itemType)
                         ))
                     }
                 }
+                legStartCoord = coord
             }
         }
 
@@ -215,6 +210,7 @@ struct ItemDetailSheet: View {
     let tripId: String
 
     @State private var showEdit = false
+    @State private var showSourcePDF = false
 
     var body: some View {
         Form {
@@ -249,6 +245,39 @@ struct ItemDetailSheet: View {
                 }
             }
 
+            if !item.legs.isEmpty {
+                Section("Legs") {
+                    ForEach(Array(item.legs.enumerated()), id: \.offset) { index, leg in
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                if let dep = leg.departureAirportCode, let arr = leg.arrivalAirportCode {
+                                    Text("\(dep) → \(arr)")
+                                        .font(.subheadline)
+                                        .fontWeight(.medium)
+                                }
+                                Spacer()
+                                if let seat = leg.seat {
+                                    Text(seat)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            if let start = leg.startTime {
+                                Text(FlexibleDateFormatter.displayString(start))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            if let end = leg.endTime {
+                                Text(FlexibleDateFormatter.displayString(end))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .padding(.vertical, 2)
+                    }
+                }
+            }
+
             Section("Location") {
                 if let name = item.location.name {
                     LabeledContent("Name", value: name)
@@ -270,6 +299,20 @@ struct ItemDetailSheet: View {
                         LabeledContent("Address", value: address)
                     }
                     if let code = endLoc.airportCode {
+                        LabeledContent("Airport", value: code)
+                    }
+                }
+            }
+
+            if let returnLoc = item.returnLocation {
+                Section("Return Location") {
+                    if let name = returnLoc.name {
+                        LabeledContent("Name", value: name)
+                    }
+                    if let address = returnLoc.address {
+                        LabeledContent("Address", value: address)
+                    }
+                    if let code = returnLoc.airportCode {
                         LabeledContent("Airport", value: code)
                     }
                 }
@@ -306,6 +349,15 @@ struct ItemDetailSheet: View {
                     Image(systemName: "pencil")
                 }
             }
+            if SourceDocumentStore.exists(for: item.id) {
+                ToolbarItem(placement: .secondaryAction) {
+                    Button {
+                        showSourcePDF = true
+                    } label: {
+                        Label("View Source PDF", systemImage: "doc.text")
+                    }
+                }
+            }
         }
         .sheet(isPresented: $showEdit) {
             EditItemSheet(
@@ -314,6 +366,11 @@ struct ItemDetailSheet: View {
                 onUpdate: { _ in showEdit = false },
                 onClose: { showEdit = false }
             )
+        }
+        .sheet(isPresented: $showSourcePDF) {
+            if let url = SourceDocumentStore.url(for: item.id) {
+                PDFPreviewView(url: url)
+            }
         }
     }
 }

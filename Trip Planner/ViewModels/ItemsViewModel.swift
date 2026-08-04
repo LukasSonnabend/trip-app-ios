@@ -31,6 +31,23 @@ final class ItemsViewModel: ObservableObject {
         }
     }
 
+    func deleteItems(tripId: String, itemIds: Set<String>) async {
+        errorMessage = nil
+        do {
+            await withThrowingTaskGroup(of: Void.self) { group in
+                for id in itemIds {
+                    group.addTask {
+                        try await self.client.requestVoid("DELETE", "trips/\(tripId)/items/\(id)")
+                    }
+                }
+            }
+            await loadItems(tripId: tripId)
+        } catch {
+            if error.isCancellationError { return }
+            errorMessage = error.localizedDescription
+        }
+    }
+
     func updateItem(tripId: String, item: ItineraryItem) async {
         do {
             let body = ItemUpdateBody(
@@ -77,31 +94,24 @@ final class ItemsViewModel: ObservableObject {
 
         let currencyPrefix = String(priceStr.prefix { !$0.isNumber && $0 != " " && $0 != "," })
 
-        let siblings: [ItineraryItem]
-        if let code = originItem.confirmationCode {
-            siblings = items.filter { $0.confirmationCode == code }
-        } else {
-            siblings = items
-        }
-        guard !siblings.isEmpty else { return }
+        let travelerNames = originItem.travelerName ?? ""
+        let travelerCount = max(1, travelerNames.isEmpty ? 1 : travelerNames.split(separator: ",").count)
 
-        let share = total / Double(siblings.count)
+        let divisor = travelerCount
+        let share = total / Double(divisor)
         let newPrice = currencyPrefix + String(format: "%.2f", share)
 
-        for sibling in siblings {
-            do {
-                let body = ItemUpdateBody(price: newPrice)
-                let updated: ItineraryItem = try await client.request(
-                    "PATCH", "trips/\(tripId)/items/\(sibling.id)", body: body
-                )
-                if let index = items.firstIndex(where: { $0.id == sibling.id }) {
-                    items[index] = updated
-                }
-            } catch {
-                if error.isCancellationError { return }
-                errorMessage = error.localizedDescription
-                return
+        do {
+            let body = ItemUpdateBody(price: newPrice)
+            let updated: ItineraryItem = try await client.request(
+                "PATCH", "trips/\(tripId)/items/\(originItem.id)", body: body
+            )
+            if let index = items.firstIndex(where: { $0.id == originItem.id }) {
+                items[index] = updated
             }
+        } catch {
+            if error.isCancellationError { return }
+            errorMessage = error.localizedDescription
         }
     }
 

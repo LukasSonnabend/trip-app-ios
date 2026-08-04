@@ -124,25 +124,31 @@ final class ItemsViewModel: ObservableObject {
 
         let currencyPrefix = String(priceStr.prefix { !$0.isNumber && $0 != " " && $0 != "," })
 
-        let travelerNames = originItem.travelerName ?? ""
-        let travelerCount = max(1, travelerNames.isEmpty ? 1 : travelerNames.split(separator: ",").count)
+        let siblings: [ItineraryItem]
+        if let code = originItem.confirmationCode {
+            siblings = items.filter { $0.confirmationCode == code }
+        } else {
+            siblings = [originItem]
+        }
+        guard !siblings.isEmpty else { return }
 
-        let divisor = travelerCount
-        let share = total / Double(divisor)
+        let share = total / Double(siblings.count)
         let newPrice = currencyPrefix + String(format: "%.2f", share)
 
-        do {
-            let body = ItemUpdateBody(price: newPrice)
-            let updated: ItineraryItem = try await client.request(
-                "PATCH", "trips/\(tripId)/items/\(originItem.id)", body: body
-            )
-            if let index = items.firstIndex(where: { $0.id == originItem.id }) {
-                items[index] = updated
-                saveCurrentItems(tripId: tripId)
+        for sibling in siblings {
+            do {
+                let body = ItemUpdateBody(price: newPrice)
+                let updated: ItineraryItem = try await client.request(
+                    "PATCH", "trips/\(tripId)/items/\(sibling.id)", body: body
+                )
+                if let index = items.firstIndex(where: { $0.id == sibling.id }) {
+                    items[index] = updated
+                }
+            } catch {
+                if error.isCancellationError { return }
+                errorMessage = error.localizedDescription
+                return
             }
-        } catch {
-            if error.isCancellationError { return }
-            errorMessage = error.localizedDescription
         }
     }
 

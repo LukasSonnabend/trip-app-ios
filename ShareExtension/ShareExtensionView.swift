@@ -23,20 +23,12 @@ struct ShareExtensionMainView: View {
                     TripSelectionView(
                         trips: trips,
                         inputSummary: viewModel.inputSummary,
-                        onSelect: { tripId in Task { await viewModel.extract(tripId: tripId) } },
+                        onSelect: { tripId in
+                            viewModel.submitExtraction(tripId: tripId)
+                            onDismiss()
+                        },
                         onCancel: onDismiss
                     )
-
-                case .extracting:
-                    VStack(spacing: 16) {
-                        ProgressView()
-                        Text("Extracting itinerary items...")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-
-                case .result(let items):
-                    ExtractionResultView(items: items, onDone: onDismiss)
 
                 case .error(let message):
                     VStack(spacing: 16) {
@@ -80,16 +72,12 @@ final class ShareExtensionViewModel: ObservableObject {
     enum State: Equatable {
         case loading
         case selectTrip([TripSummary])
-        case extracting
-        case result([ItineraryItem])
         case error(String)
 
         static func == (lhs: State, rhs: State) -> Bool {
             switch (lhs, rhs) {
             case (.loading, .loading): return true
             case (.selectTrip(let a), .selectTrip(let b)): return a.map(\.id) == b.map(\.id)
-            case (.extracting, .extracting): return true
-            case (.result(let a), .result(let b)): return a.map(\.id) == b.map(\.id)
             case (.error(let a), .error(let b)): return a == b
             default: return false
             }
@@ -126,28 +114,31 @@ final class ShareExtensionViewModel: ObservableObject {
         }
     }
 
-    func extract(tripId: String) async {
-        state = .extracting
-        let pdfData = sharedFile?.0
-        do {
-            let hasFile = sharedFile != nil
-            let items: [ItineraryItem] = try await client.uploadMultipart(
-                "trips/\(tripId)/items/extract",
-                textContent: hasFile ? nil : sharedContent,
-                url: hasFile ? nil : sharedURL,
-                fileData: pdfData,
-                fileName: sharedFile?.1,
-                mimeType: sharedFile != nil ? "application/pdf" : nil
-            )
-            if let data = pdfData {
-                for item in items {
-                    SourceDocumentStore.save(data: data, for: item.id)
+    func submitExtraction(tripId: String) {
+        let fileData = sharedFile?.0
+        let fileName = sharedFile?.1
+        let content = sharedContent
+        let url = sharedURL
+        let hasFile = sharedFile != nil
+
+        Task {
+            do {
+                let items: [ItineraryItem] = try await client.uploadMultipart(
+                    "trips/\(tripId)/items/extract",
+                    textContent: hasFile ? nil : content,
+                    url: hasFile ? nil : url,
+                    fileData: fileData,
+                    fileName: fileName,
+                    mimeType: hasFile ? "application/pdf" : nil
+                )
+                if let data = fileData {
+                    for item in items {
+                        SourceDocumentStore.save(data: data, for: item.id)
+                    }
                 }
+            } catch {
+                _ = error
             }
-            state = .result(items)
-        } catch {
-            if error.isCancellationError { return }
-            state = .error(error.localizedDescription)
         }
     }
 }
@@ -204,79 +195,6 @@ struct TripSelectionView: View {
             ToolbarItem(placement: .cancellationAction) {
                 Button("Cancel", action: onCancel)
             }
-        }
-    }
-}
-
-struct ExtractionResultView: View {
-    let items: [ItineraryItem]
-    let onDone: () -> Void
-
-    var body: some View {
-        VStack(spacing: 0) {
-            if items.isEmpty {
-                VStack(spacing: 16) {
-                    Image(systemName: "doc.text.magnifyingglass")
-                        .font(.system(size: 40))
-                        .foregroundStyle(.secondary)
-                    Text("Nothing found")
-                        .font(.title3)
-                        .fontWeight(.semibold)
-                    Text("We couldn't extract any travel information from what you shared. The content may not contain recognizable itinerary details.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 24)
-                }
-                .padding(.top, 48)
-            } else {
-                Text("Added \(items.count) item\(items.count == 1 ? "" : "s")")
-                    .font(.headline)
-                    .padding()
-
-                List(items) { item in
-                    HStack {
-                        Image(systemName: item.itemType.iconName)
-                            .frame(width: 24)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(item.title)
-                                .font(.subheadline)
-                                .fontWeight(.medium)
-                            if let traveler = item.travelerName {
-                                Text(traveler)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            if let start = item.startTime {
-                                Text(FlexibleDateFormatter.displayString(start))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        Spacer()
-                        if let price = item.price {
-                            Text(price)
-                                .font(.caption)
-                                .fontWeight(.medium)
-                                .foregroundStyle(.tint)
-                        }
-                    }
-                }
-                .listStyle(.inset)
-            }
-
-            Spacer()
-
-            Button {
-                onDone()
-            } label: {
-                Text("Done")
-                    .fontWeight(.semibold)
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .padding()
         }
     }
 }

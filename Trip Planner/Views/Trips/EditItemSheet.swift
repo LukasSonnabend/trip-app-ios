@@ -164,6 +164,7 @@ struct ItemUpdateBody: Encodable {
     var startTime: String? = nil
     var endTime: String? = nil
     var location: LocationUpdateBody? = nil
+    var endLocation: LocationUpdateBody? = nil
     var details: DetailsUpdateBody? = nil
 
     enum CodingKeys: String, CodingKey {
@@ -172,7 +173,9 @@ struct ItemUpdateBody: Encodable {
         case travelerName = "traveler_name"
         case startTime = "start_time"
         case endTime = "end_time"
-        case location, details
+        case location
+        case endLocation = "end_location"
+        case details
     }
 
     func encode(to encoder: Encoder) throws {
@@ -185,6 +188,7 @@ struct ItemUpdateBody: Encodable {
         try container.encodeIfPresent(startTime, forKey: .startTime)
         try container.encodeIfPresent(endTime, forKey: .endTime)
         try container.encodeIfPresent(location, forKey: .location)
+        try container.encodeIfPresent(endLocation, forKey: .endLocation)
         try container.encodeIfPresent(details, forKey: .details)
     }
 }

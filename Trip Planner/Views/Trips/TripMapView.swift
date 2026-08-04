@@ -11,6 +11,19 @@ struct TripMapView: View {
     @State private var selectedItem: ItineraryItem?
     @State private var camera: MapCameraPosition = .automatic
     @State private var selection: String?
+    @State private var showLocations = true
+
+    private var locationItems: [ItineraryItem] {
+        items.filter { $0.startTime == nil && $0.endTime == nil }
+    }
+
+    private var itineraryItems: [ItineraryItem] {
+        items.filter { $0.startTime != nil || $0.endTime != nil }
+    }
+
+    private var displayedItems: [ItineraryItem] {
+        showLocations ? items : itineraryItems
+    }
 
     var body: some View {
         Map(position: $camera, selection: $selection) {
@@ -38,8 +51,22 @@ struct TripMapView: View {
                 selectedItem = annotation.representativeItem
             }
         }
+        .onChange(of: showLocations) { _, _ in
+            Task { await geocodeItems() }
+        }
         .task {
             await geocodeItems()
+        }
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                if !locationItems.isEmpty {
+                    Button {
+                        showLocations.toggle()
+                    } label: {
+                        Image(systemName: showLocations ? "mappin.circle.fill" : "mappin.circle")
+                    }
+                }
+            }
         }
     }
 
@@ -50,9 +77,9 @@ struct TripMapView: View {
         var coordinateUpdates: [String: ItemCoordinateUpdate] = [:]
         var itemPickupCoords: [String: CLLocationCoordinate2D] = [:]
         var itemDropoffCoords: [String: CLLocationCoordinate2D] = [:]
-        let rentalCarIds = Set(items.filter { $0.itemType == .rentalCar }.map(\.id))
+        let rentalCarIds = Set(displayedItems.filter { $0.itemType == .rentalCar }.map(\.id))
 
-        for item in items {
+        for item in displayedItems {
             let locs: [(Location, Bool)] = if !item.legs.isEmpty {
                 item.legs.flatMap { leg -> [(Location, Bool)] in
                     var results: [(Location, Bool)] = [

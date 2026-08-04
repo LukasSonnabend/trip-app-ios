@@ -61,6 +61,9 @@ struct ShareExtensionMainView: View {
                 if let fileData = notification.userInfo?["fileData"] as? (Data, String) {
                     viewModel.sharedFile = fileData
                 }
+                if let mapLocation = notification.userInfo?["mapLocation"] as? ParsedMapLocation {
+                    viewModel.sharedMapLocation = mapLocation
+                }
                 viewModel.updateSummary()
             }
         }
@@ -89,6 +92,7 @@ final class ShareExtensionViewModel: ObservableObject {
     var sharedContent: String?
     var sharedURL: String?
     var sharedFile: (Data, String)?
+    var sharedMapLocation: ParsedMapLocation?
 
     private var trips: [TripSummary] = []
     private let client = APIClient.shared
@@ -105,7 +109,15 @@ final class ShareExtensionViewModel: ObservableObject {
     }
 
     func updateSummary() {
-        if let url = sharedURL {
+        if let location = sharedMapLocation {
+            var parts: [String] = []
+            if let name = location.name { parts.append(name) }
+            if let address = location.address { parts.append(address) }
+            if let lat = location.latitude, let lng = location.longitude {
+                parts.append(String(format: "%.4f, %.4f", lat, lng))
+            }
+            inputSummary = "Location: \(parts.joined(separator: " · "))"
+        } else if let url = sharedURL {
             inputSummary = "Link: \(URL(string: url)?.host ?? url)"
         } else if let content = sharedContent {
             inputSummary = content.count > 80 ? String(content.prefix(80)) + "..." : content
@@ -115,6 +127,11 @@ final class ShareExtensionViewModel: ObservableObject {
     }
 
     func submitExtraction(tripId: String) {
+        if let location = sharedMapLocation {
+            submitLocation(tripId: tripId, location: location)
+            return
+        }
+
         let fileData = sharedFile?.0
         let fileName = sharedFile?.1
         let content = sharedContent
@@ -136,6 +153,30 @@ final class ShareExtensionViewModel: ObservableObject {
                         SourceDocumentStore.save(data: data, for: item.id)
                     }
                 }
+            } catch {
+                _ = error
+            }
+        }
+    }
+
+    private func submitLocation(tripId: String, location: ParsedMapLocation) {
+        let title = location.name ?? location.address ?? "Shared Location"
+        let body = CreateLocationBody(
+            itemType: .generic,
+            title: title,
+            location: LocationBody(
+                name: location.name,
+                address: location.address,
+                airportCode: nil,
+                latitude: location.latitude,
+                longitude: location.longitude
+            ),
+            startTime: nil
+        )
+
+        Task {
+            do {
+                let _: ItineraryItem = try await client.request("POST", "trips/\(tripId)/items", body: body)
             } catch {
                 _ = error
             }
@@ -220,5 +261,18 @@ struct NotAuthenticatedExtensionView: View {
                 .buttonStyle(.bordered)
                 .padding(.top, 8)
         }
+    }
+}
+
+struct CreateLocationBody: Encodable {
+    let itemType: ItemType
+    let title: String
+    let location: LocationBody
+    let startTime: String?
+
+    enum CodingKeys: String, CodingKey {
+        case title, location
+        case itemType = "item_type"
+        case startTime = "start_time"
     }
 }

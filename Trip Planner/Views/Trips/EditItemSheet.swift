@@ -129,7 +129,9 @@ struct EditItemSheet: View {
             location: LocationUpdateBody(
                 name: nilOrValue(locationName),
                 address: nilOrValue(locationAddress),
-                airportCode: nilOrValue(airportCode)
+                airportCode: nilOrValue(airportCode),
+                latitude: nil,
+                longitude: nil
             ),
             details: DetailsUpdateBody(
                 seat: nilOrValue(seat),
@@ -190,17 +192,6 @@ struct ItemUpdateBody: Encodable {
         try container.encodeIfPresent(location, forKey: .location)
         try container.encodeIfPresent(endLocation, forKey: .endLocation)
         try container.encodeIfPresent(details, forKey: .details)
-    }
-}
-
-struct LocationUpdateBody: Encodable {
-    let name: String?
-    let address: String?
-    let airportCode: String?
-
-    enum CodingKeys: String, CodingKey {
-        case name, address
-        case airportCode = "airport_code"
     }
 }
 

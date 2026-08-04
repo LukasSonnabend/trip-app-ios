@@ -296,8 +296,168 @@ struct ItemCoordinateUpdate: Codable {
     }
 }
 
+// MARK: - Request Bodies
+
+struct LocationBody: Encodable {
+    let name: String?
+    let address: String?
+    let airportCode: String?
+    let latitude: Double?
+    let longitude: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case name, address, latitude, longitude
+        case airportCode = "airport_code"
+    }
+}
+
+struct LocationUpdateBody: Encodable {
+    let name: String?
+    let address: String?
+    let airportCode: String?
+    let latitude: Double?
+    let longitude: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case name, address, latitude, longitude
+        case airportCode = "airport_code"
+    }
+}
+
 // MARK: - API Error
 
 struct APIErrorResponse: Codable {
     let detail: String?
+}
+
+// MARK: - Travelers
+
+struct Traveler: Codable, Identifiable, Hashable {
+    let id: String
+    let tripId: String
+    let name: String
+    let userId: String?
+    let color: String?
+    let createdAt: String
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, color
+        case tripId = "trip_id"
+        case userId = "user_id"
+        case createdAt = "created_at"
+    }
+}
+
+struct CreateTravelerRequest: Codable {
+    let name: String
+    let userId: String?
+    let color: String?
+
+    enum CodingKeys: String, CodingKey {
+        case name, color
+        case userId = "user_id"
+    }
+}
+
+struct UpdateTravelerRequest: Codable {
+    let name: String?
+    let color: String?
+
+    enum CodingKeys: String, CodingKey {
+        case name, color
+    }
+}
+
+// MARK: - Expense Splits
+
+struct ExpenseSplit: Codable {
+    let splitType: String
+    let assignedTravelerId: String?
+    let shares: [ExpenseShare]
+
+    enum CodingKeys: String, CodingKey {
+        case splitType = "split_type"
+        case assignedTravelerId = "assigned_traveler_id"
+        case shares
+    }
+}
+
+struct ExpenseShare: Codable, Identifiable {
+    let id: String
+    let travelerId: String
+    let travelerName: String
+    let isPaid: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case travelerId = "traveler_id"
+        case travelerName = "traveler_name"
+        case isPaid = "is_paid"
+    }
+}
+
+struct UpsertSplitRequest: Codable {
+    let splitType: String
+    let assignedTravelerId: String?
+    let travelerIds: [String]?
+
+    enum CodingKeys: String, CodingKey {
+        case splitType = "split_type"
+        case assignedTravelerId = "assigned_traveler_id"
+        case travelerIds = "traveler_ids"
+    }
+}
+
+// MARK: - Budget
+
+struct BudgetResponse: Codable {
+    let total: String
+    let unsplitTotal: String
+    let perTraveler: [TravelerBudget]
+
+    enum CodingKeys: String, CodingKey {
+        case total
+        case unsplitTotal = "unsplit_total"
+        case perTraveler = "per_traveler"
+    }
+}
+
+struct TravelerBudget: Codable, Identifiable {
+    var id: String { travelerId }
+    let travelerId: String
+    let travelerName: String
+    let color: String?
+    let total: String
+    let paid: String
+    let unpaid: String
+    let itemCount: Int
+    let items: [BudgetItem]
+
+    enum CodingKeys: String, CodingKey {
+        case travelerId = "traveler_id"
+        case travelerName = "traveler_name"
+        case color, total, paid, unpaid, items
+        case itemCount = "item_count"
+    }
+}
+
+struct BudgetItem: Codable, Identifiable {
+    var id: String { itemId }
+    let itemId: String
+    let itemTitle: String
+    let itemType: String
+    let price: String?
+    let shareAmount: String
+    let isPaid: Bool
+    let shareId: String
+
+    enum CodingKeys: String, CodingKey {
+        case itemId = "item_id"
+        case itemTitle = "item_title"
+        case itemType = "item_type"
+        case price
+        case shareAmount = "share_amount"
+        case isPaid = "is_paid"
+        case shareId = "share_id"
+    }
 }

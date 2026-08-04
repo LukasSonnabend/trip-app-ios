@@ -276,6 +276,52 @@ final class APIClient {
         data.append(fileData)
         data.append("\r\n".data(using: .utf8)!)
     }
+
+    // MARK: - Travelers
+
+    func listTravelers(tripId: String) async throws -> [Traveler] {
+        try await request("GET", "trips/\(tripId)/travelers")
+    }
+
+    func createTraveler(tripId: String, name: String, userId: String? = nil, color: String? = nil) async throws -> Traveler {
+        try await request("POST", "trips/\(tripId)/travelers", body: CreateTravelerRequest(name: name, userId: userId, color: color))
+    }
+
+    func updateTraveler(tripId: String, travelerId: String, name: String? = nil, color: String? = nil) async throws -> Traveler {
+        try await request("PATCH", "trips/\(tripId)/travelers/\(travelerId)", body: UpdateTravelerRequest(name: name, color: color))
+    }
+
+    func deleteTraveler(tripId: String, travelerId: String) async throws {
+        try await requestVoid("DELETE", "trips/\(tripId)/travelers/\(travelerId)")
+    }
+
+    // MARK: - Expense Splits
+
+    func getSplit(tripId: String, itemId: String) async throws -> ExpenseSplit {
+        try await request("GET", "trips/\(tripId)/items/\(itemId)/split")
+    }
+
+    func upsertSplit(tripId: String, itemId: String, splitType: String, assignedTravelerId: String?, travelerIds: [String]?) async throws -> ExpenseSplit {
+        try await request("PUT", "trips/\(tripId)/items/\(itemId)/split", body: UpsertSplitRequest(splitType: splitType, assignedTravelerId: assignedTravelerId, travelerIds: travelerIds))
+    }
+
+    func deleteSplit(tripId: String, itemId: String) async throws {
+        try await requestVoid("DELETE", "trips/\(tripId)/items/\(itemId)/split")
+    }
+
+    func toggleSharePaid(tripId: String, itemId: String, shareId: String, isPaid: Bool) async throws -> ExpenseShare {
+        struct TogglePaidBody: Codable {
+            let isPaid: Bool
+            enum CodingKeys: String, CodingKey { case isPaid = "is_paid" }
+        }
+        return try await request("PATCH", "trips/\(tripId)/items/\(itemId)/split/shares/\(shareId)", body: TogglePaidBody(isPaid: isPaid))
+    }
+
+    // MARK: - Budget
+
+    func getBudget(tripId: String) async throws -> BudgetResponse {
+        try await request("GET", "trips/\(tripId)/budget")
+    }
 }
 
 struct AnyEncodable: Encodable {

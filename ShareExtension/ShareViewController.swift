@@ -7,6 +7,7 @@ class ShareViewController: UIViewController {
     private var sharedContent: String?
     private var sharedURL: String?
     private var sharedFileData: (Data, String)?
+    private var sharedMapLocation: ParsedMapLocation?
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -76,6 +77,9 @@ class ShareViewController: UIViewController {
                 if let url = try? await provider.loadItem(forTypeIdentifier: UTType.url.identifier) as? URL {
                     if !url.isFileURL {
                         sharedURL = url.absoluteString
+                        if let parsed = await MapURLLocationParser.parseResolving(url) {
+                            sharedMapLocation = parsed
+                        }
                     }
                 }
                 continue
@@ -97,6 +101,7 @@ class ShareViewController: UIViewController {
                 "content": sharedContent as Any,
                 "url": sharedURL as Any,
                 "fileData": sharedFileData as Any,
+                "mapLocation": sharedMapLocation as Any,
             ]
         )
     }

@@ -108,7 +108,9 @@ struct CreateItemSheet: View {
             location: LocationBody(
                 name: nilOrEmpty(locationName),
                 address: nilOrEmpty(locationAddress),
-                airportCode: nilOrEmpty(airportCode)
+                airportCode: nilOrEmpty(airportCode),
+                latitude: nil,
+                longitude: nil
             ),
             endLocation: nil,
             details: DetailsBody(
@@ -156,17 +158,6 @@ struct CreateItemBody: Encodable {
         case startTime = "start_time"
         case endTime = "end_time"
         case endLocation = "end_location"
-    }
-}
-
-struct LocationBody: Encodable {
-    let name: String?
-    let address: String?
-    let airportCode: String?
-
-    enum CodingKeys: String, CodingKey {
-        case name, address
-        case airportCode = "airport_code"
     }
 }
 

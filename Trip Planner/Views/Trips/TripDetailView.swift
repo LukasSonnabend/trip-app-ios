@@ -9,6 +9,7 @@ struct TripDetailView: View {
     @State private var showInvite = false
     @State private var showCreatedInvite = false
     @State private var editingItem: ItineraryItem?
+    @State private var showingCreateItem = false
     @State private var isSelecting = false
     @State private var selectedIds = Set<String>()
 
@@ -51,6 +52,15 @@ struct TripDetailView: View {
                     }
                 },
                 onClose: { editingItem = nil }
+            )
+        }
+        .sheet(isPresented: $showingCreateItem) {
+            CreateItemSheet(
+                tripId: tripId,
+                onCreate: { newItem in
+                    itemsVM.items.append(newItem)
+                },
+                onClose: { showingCreateItem = false }
             )
         }
         .onChange(of: isSelecting) { _, newValue in
@@ -182,6 +192,13 @@ struct TripDetailView: View {
                     Image(systemName: "checkmark.circle")
                 }
             }
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    showingCreateItem = true
+                } label: {
+                    Image(systemName: "plus")
+                }
+            }
         }
     }
 }
@@ -212,6 +229,16 @@ struct ItemCard: View {
                     }
                 }
                 Spacer()
+
+                if item.confidence == "low" || item.confidence == "medium" {
+                    Text("!")
+                        .font(.caption2)
+                        .fontWeight(.bold)
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(item.confidence == "low" ? Color.red : Color.orange, in: Capsule())
+                }
 
                 if let price = item.price {
                     Text(price)

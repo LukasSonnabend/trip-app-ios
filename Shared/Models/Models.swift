@@ -263,10 +263,11 @@ struct ItineraryItem: Codable, Identifiable {
     let endLocation: Location?
     let returnLocation: Location?
     let legs: [Leg]
+    let confidence: String?
     let details: ItemDetails
 
     enum CodingKeys: String, CodingKey {
-        case id, title, provider, location, details, price, legs
+        case id, title, provider, location, details, price, legs, confidence
         case addedBy = "added_by"
         case itemType = "item_type"
         case confirmationCode = "confirmation_code"

@@ -15,7 +15,7 @@ final class ItemsViewModel: ObservableObject {
         let key = cacheKey(for: tripId)
 
         if let cached = loadCachedItems(key: key) {
-            items = cached
+            items = sortItems(cached)
         }
 
         if items.isEmpty {
@@ -26,7 +26,7 @@ final class ItemsViewModel: ObservableObject {
 
         do {
             let fetched: [ItineraryItem] = try await client.request("GET", "trips/\(tripId)/items")
-            items = fetched
+            items = sortItems(fetched)
             saveCachedItems(fetched, key: key)
         } catch {
             if error.isCancellationError { return }
@@ -199,5 +199,17 @@ final class ItemsViewModel: ObservableObject {
 
     private func saveCurrentItems(tripId: String) {
         saveCachedItems(items, key: cacheKey(for: tripId))
+    }
+
+    func sortItems(_ unsorted: [ItineraryItem]) -> [ItineraryItem] {
+        unsorted.sorted { a, b in
+            let dateA = a.startTime.flatMap(FlexibleDateFormatter.parse(_:))
+            let dateB = b.startTime.flatMap(FlexibleDateFormatter.parse(_:))
+            switch (dateA, dateB) {
+            case (let da?, let db?): return da < db
+            case (nil, _): return false
+            case (_, nil): return true
+            }
+        }
     }
 }

@@ -52,6 +52,8 @@ struct TripMapView: View {
         var routeKeys: Set<String> = []
         var routeList: [RouteOverlay] = []
         var coordinateUpdates: [String: ItemCoordinateUpdate] = [:]
+        var itemPickupCoords: [String: CLLocationCoordinate2D] = [:]
+        var itemDropoffCoords: [String: CLLocationCoordinate2D] = [:]
 
         for item in items {
             let locs: [(Location, Bool)] = if !item.legs.isEmpty {
@@ -71,6 +73,7 @@ struct TripMapView: View {
             }
 
             var legStartCoord: CLLocationCoordinate2D?
+            var firstCoordForItem = true
 
             for (loc, isEnd) in locs {
                 let (coord, isNew) = await resolveCoordinate(for: loc)
@@ -99,19 +102,70 @@ struct TripMapView: View {
                     )
                 }
 
-                if let start = legStartCoord, isEnd {
-                    let rKey = "\(coordinateKey(start))->\(key)"
-                    if !routeKeys.contains(rKey) {
-                        routeKeys.insert(rKey)
-                        routeList.append(RouteOverlay(
-                            id: rKey,
-                            start: start,
-                            end: coord,
-                            color: color(for: item.itemType)
-                        ))
+                if firstCoordForItem {
+                    itemPickupCoords[item.id] = coord
+                    firstCoordForItem = false
+                }
+                if isEnd {
+                    itemDropoffCoords[item.id] = coord
+                    if let start = legStartCoord {
+                        let rKey = "\(coordinateKey(start))->\(key)"
+                        if !routeKeys.contains(rKey) {
+                            routeKeys.insert(rKey)
+                            routeList.append(RouteOverlay(
+                                id: rKey,
+                                start: start,
+                                end: coord,
+                                color: color(for: item.itemType)
+                            ))
+                        }
                     }
                 }
                 legStartCoord = coord
+            }
+        }
+
+        let itemCoordMap = buildItemCoordMap(from: grouped)
+
+        for car in items where car.itemType == .rentalCar {
+            guard let pickupCoord = itemPickupCoords[car.id],
+                  let dropoffCoord = itemDropoffCoords[car.id],
+                  let carStart = car.startTime.flatMap(FlexibleDateFormatter.parse(_:)),
+                  let carEnd = car.endTime.flatMap(FlexibleDateFormatter.parse(_:)) else { continue }
+
+            let related = items
+                .filter { $0.id != car.id }
+                .filter { item in
+                    guard let start = item.startTime.flatMap(FlexibleDateFormatter.parse(_:)) else { return false }
+                    return start >= carStart && start <= carEnd
+                }
+                .sorted { a, b in
+                    let dateA = a.startTime.flatMap(FlexibleDateFormatter.parse(_:)) ?? Date.distantFuture
+                    let dateB = b.startTime.flatMap(FlexibleDateFormatter.parse(_:)) ?? Date.distantFuture
+                    return dateA < dateB
+                }
+
+            var chainCoords = [pickupCoord]
+            for relatedItem in related {
+                if let coord = itemCoordMap[relatedItem.id] {
+                    chainCoords.append(coord)
+                }
+            }
+            chainCoords.append(dropoffCoord)
+
+            for i in 0..<(chainCoords.count - 1) {
+                let start = chainCoords[i]
+                let end = chainCoords[i + 1]
+                let rKey = "rental-\(car.id)-\(i)"
+                if !routeKeys.contains(rKey) {
+                    routeKeys.insert(rKey)
+                    routeList.append(RouteOverlay(
+                        id: rKey,
+                        start: start,
+                        end: end,
+                        color: color(for: .rentalCar)
+                    ))
+                }
             }
         }
 
@@ -128,6 +182,16 @@ struct TripMapView: View {
                 span: MKCoordinateSpan(latitudeDelta: 2, longitudeDelta: 2)
             ))
         }
+    }
+
+    private func buildItemCoordMap(from grouped: [String: ItemAnnotation]) -> [String: CLLocationCoordinate2D] {
+        var map: [String: CLLocationCoordinate2D] = [:]
+        for annotation in grouped.values {
+            for item in annotation.items {
+                map[item.id] = annotation.coordinate
+            }
+        }
+        return map
     }
 
     private func resolveCoordinate(for location: Location) async -> (CLLocationCoordinate2D?, Bool) {

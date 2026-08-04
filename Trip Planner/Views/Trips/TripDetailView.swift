@@ -57,9 +57,10 @@ struct TripDetailView: View {
         .sheet(isPresented: $showingCreateItem) {
             CreateItemSheet(
                 tripId: tripId,
-                onCreate: { newItem in
-                    itemsVM.items.append(newItem)
-                },
+                    onCreate: { newItem in
+                        itemsVM.items.append(newItem)
+                        itemsVM.items = itemsVM.sortItems(itemsVM.items)
+                    },
                 onClose: { showingCreateItem = false }
             )
         }

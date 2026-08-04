@@ -8,42 +8,71 @@ final class ItemsViewModel: ObservableObject {
     @Published var errorMessage: String?
 
     private let client = APIClient.shared
+    private let decoder = JSONDecoder()
+    private let encoder = JSONEncoder()
 
     func loadItems(tripId: String) async {
-        isLoading = true
+        let key = cacheKey(for: tripId)
+
+        if let cached = loadCachedItems(key: key) {
+            items = cached
+        }
+
+        if items.isEmpty {
+            isLoading = true
+        }
         errorMessage = nil
         defer { isLoading = false }
+
         do {
-            items = try await client.request("GET", "trips/\(tripId)/items")
+            let fetched: [ItineraryItem] = try await client.request("GET", "trips/\(tripId)/items")
+            items = fetched
+            saveCachedItems(fetched, key: key)
         } catch {
             if error.isCancellationError { return }
-            errorMessage = error.localizedDescription
+            if items.isEmpty {
+                errorMessage = error.localizedDescription
+            }
         }
     }
 
     func deleteItem(tripId: String, itemId: String) async {
+        let removed = items.first { $0.id == itemId }
+        items.removeAll { $0.id == itemId }
+        saveCurrentItems(tripId: tripId)
+
         do {
             try await client.requestVoid("DELETE", "trips/\(tripId)/items/\(itemId)")
-            await loadItems(tripId: tripId)
         } catch {
             if error.isCancellationError { return }
+            if let removed {
+                items.append(removed)
+                saveCurrentItems(tripId: tripId)
+            }
             errorMessage = error.localizedDescription
         }
     }
 
     func deleteItems(tripId: String, itemIds: Set<String>) async {
+        let removed = items.filter { itemIds.contains($0.id) }
+        items.removeAll { itemIds.contains($0.id) }
+        saveCurrentItems(tripId: tripId)
         errorMessage = nil
+
         do {
-            await withThrowingTaskGroup(of: Void.self) { group in
+            try await withThrowingTaskGroup(of: Void.self) { group in
                 for id in itemIds {
                     group.addTask {
                         try await self.client.requestVoid("DELETE", "trips/\(tripId)/items/\(id)")
                     }
                 }
             }
-            await loadItems(tripId: tripId)
         } catch {
             if error.isCancellationError { return }
+            for r in removed {
+                items.append(r)
+            }
+            saveCurrentItems(tripId: tripId)
             errorMessage = error.localizedDescription
         }
     }
@@ -77,6 +106,7 @@ final class ItemsViewModel: ObservableObject {
             )
             if let index = items.firstIndex(where: { $0.id == item.id }) {
                 items[index] = updated
+                saveCurrentItems(tripId: tripId)
             }
         } catch {
             if error.isCancellationError { return }
@@ -108,6 +138,7 @@ final class ItemsViewModel: ObservableObject {
             )
             if let index = items.firstIndex(where: { $0.id == originItem.id }) {
                 items[index] = updated
+                saveCurrentItems(tripId: tripId)
             }
         } catch {
             if error.isCancellationError { return }
@@ -141,5 +172,26 @@ final class ItemsViewModel: ObservableObject {
             errorMessage = error.localizedDescription
             return []
         }
+    }
+
+    // MARK: - Cache
+
+    private func cacheKey(for tripId: String) -> String {
+        "cached_items_\(tripId)"
+    }
+
+    private func loadCachedItems(key: String) -> [ItineraryItem]? {
+        guard let data = UserDefaults.standard.data(forKey: key) else { return nil }
+        return try? decoder.decode([ItineraryItem].self, from: data)
+    }
+
+    private func saveCachedItems(_ items: [ItineraryItem], key: String) {
+        if let data = try? encoder.encode(items) {
+            UserDefaults.standard.set(data, forKey: key)
+        }
+    }
+
+    private func saveCurrentItems(tripId: String) {
+        saveCachedItems(items, key: cacheKey(for: tripId))
     }
 }
